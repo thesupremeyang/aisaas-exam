@@ -25,5 +25,16 @@
             <groupId>com.hxh.apboa.next</groupId>
             <artifactId>biz-params</artifactId>
         </dependency>
+        <!-- Git 技能导入依赖 -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>7.3.0.202506031305-r</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit.ssh.apache</artifactId>
+            <version>7.3.0.202506031305-r</version>
+        </dependency>
     </dependencies>
 </project>
