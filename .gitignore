@@ -1,0 +1,65 @@
+# Build outputs
+*/target/
+target/
+dist/
+*.jar
+*.war
+*.original
+
+# Dependencies
+node_modules/
+
+# Runtime data
+.apboa/
+.apboa-exam/
+.tmp_logs/
+outputs/
+
+# Generated deployment artifacts
+artifacts_build/
+wwwroot/jars/
+wwwroot/dist-main/
+
+# Instance-specific database export
+sql/once_db_init/apboa_exam.sql
+
+# Archives
+*.zip
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Temp
+.apboa/temp/
+.apboa/**/temp_response.txt
+
+# Env
+.env
+.env.local
+docker/.env.*
+runner-*/src/main/resources/application-dev.yml
+runner-*/src/main/resources/application-dev-simple.yml
+runner-*/src/main/resources/application-exam-local.yml
+
+# Local tooling / workspace dirs
+.agents/
+.codex/
+.codegraph/
+.pnpm-store/
+.tmp_logs/
+.trellis/
+.workbuddy/
+$null

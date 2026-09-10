@@ -1,0 +1,236 @@
+/**
+ * v2 门户布局样式
+ *
+ * 左侧 Sider（Logo + 菜单 + 用户区）+ 右侧（顶部 sub-header + 内容区）
+ * 含 deco-orb 背景装饰、移动端断点适配
+ *
+ * @author huxuehao
+ */
+
+$breakpoint-lg: 1024px !default;
+$breakpoint-md: 768px !default;
+
+$color-text-primary: #0f172a !default;
+$color-text-secondary: #64748b !default;
+$color-text-muted: #94a3b8 !default;
+$color-border: #e2e8f0 !default;
+$color-bg: #f8fafc !default;
+$color-primary: #2563eb !default;
+
+$layout-sider-width: 248px !default;
+$layout-sider-width-collapsed: 64px !default;
+$layout-header-height: 64px !default;
+
+/* ===================== 主布局 ===================== */
+.app-layout-v2 {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  background-color: $color-bg;
+  overflow: hidden;
+}
+
+/* ===================== 左侧侧边栏 ===================== */
+.layout-v2-sider {
+  display: flex;
+  flex-direction: column;
+  width: $layout-sider-width;
+  flex-shrink: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  z-index: 20;
+  transition: width 0.25s ease;
+
+  .sider-v2-logo {
+    height: $layout-header-height;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  }
+
+  .sider-v2-menu {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .sider-v2-user {
+    flex-shrink: 0;
+  }
+
+  /* 中等屏幕收起为窄条 */
+  @media (max-width: $breakpoint-lg) {
+    width: $layout-sider-width-collapsed;
+  }
+
+  /* 移动端完全隐藏，改为 Drawer */
+  @media (max-width: $breakpoint-md) {
+    display: none;
+  }
+}
+
+.layout-v3-sider {
+  position: relative;
+  width: $layout-sider-width;
+  box-shadow: 8px 0 28px rgba(30, 61, 107, 0.06);
+
+  &.collapsed {
+    width: $layout-sider-width-collapsed;
+
+    .sider-v2-toolbar {
+      display: none;
+    }
+  }
+}
+
+.layout-v3-collapse-trigger {
+  position: absolute;
+  top: 78px;
+  right: -13px;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid #d7e3f3;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #6f8199;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(37, 75, 132, 0.14);
+  cursor: pointer;
+  z-index: 3;
+
+  &:hover {
+    color: #2563eb;
+    border-color: #bcd1f1;
+    transform: scale(1.05);
+  }
+}
+
+/* ===================== 右侧主区 ===================== */
+.layout-v2-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  position: relative;
+}
+
+.layout-v2-header {
+  height: $layout-header-height;
+  flex-shrink: 0;
+  background-color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  z-index: 10;
+}
+
+.layout-v2-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background-color: $color-bg;
+  position: relative;
+}
+
+/* ===================== 背景装饰光斑 ===================== */
+.layout-v2-bg-deco {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.deco-v2-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.35;
+}
+
+.deco-v2-orb-1 {
+  top: -120px;
+  right: -80px;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.18) 0%, transparent 70%);
+}
+
+.deco-v2-orb-2 {
+  bottom: -100px;
+  left: 20%;
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+}
+
+/* ===================== 移动端抽屉开关 ===================== */
+.layout-v2-mobile-trigger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: $color-text-secondary;
+  cursor: pointer;
+  font-size: 18px;
+  margin-right: 12px;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #f1f5f9;
+    color: $color-primary;
+  }
+
+  @media (max-width: $breakpoint-md) {
+    display: inline-flex;
+  }
+}
+
+.layout-v2-drawer {
+  display: none;
+
+  @media (max-width: $breakpoint-md) {
+    display: block;
+  }
+}
+
+/* ===================== 路由切换动画 ===================== */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.layout-v2-content > .slide-right-enter-active,
+.layout-v2-content > .slide-right-leave-active {
+  position: relative;
+  z-index: 1;
+}
+
+.slide-right-enter-from {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+
+.slide-right-enter-to {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.slide-right-leave-from {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
+}

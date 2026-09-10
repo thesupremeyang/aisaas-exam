@@ -1,0 +1,387 @@
+/**
+ * 技能管理主页面
+ *
+ * @author huxuehao
+ */
+<script setup lang="ts">
+/* eslint-disable vue/multi-word-component-names */
+import { onMounted, ref, computed, h, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { Modal } from 'ant-design-vue'
+import {SearchOutlined, AppstoreOutlined} from '@ant-design/icons-vue'
+import { useSkillStore } from '@/stores'
+import { storeToRefs } from 'pinia'
+import * as skillApi from '@/api/skill'
+import SkillCard from '@/components/skill/SkillCard.vue'
+import CreateCard from '@/components/skill/CreateCard.vue'
+import ImportLocalForm from '@/components/skill/ImportLocalForm.vue'
+import ImportGitForm from '@/components/skill/ImportGitForm.vue'
+import ImportUploadForm from '@/components/skill/ImportUploadForm.vue'
+import SkillToolLinkModal from '@/components/skill/SkillToolLinkModal.vue'
+import {ApboaModalApi} from "@/components/common/ApboaModalApi.ts";
+import ApboaInfiniteLoading from '@/components/common/ApboaInfiniteLoading.vue'
+
+const store = useSkillStore()
+const router = useRouter()
+const { list, categories, selectedCategory, keyword, loading, hasMore } = storeToRefs(store)
+
+const importLocalVisible = ref(false)
+const importGitVisible = ref(false)
+const importUploadVisible = ref(false)
+
+/** 关联工具弹窗状态 */
+const toolLinkVisible = ref(false)
+const toolLinkSkillId = ref<string>('')
+
+const infiniteLoadingKey = ref(0)
+/** 查分回看模式：列表可查看，禁止新增、导入和修改 */
+const scoreReviewMode = computed(
+  () => sessionStorage.getItem('exam:score-query-mode') === '1'
+    && sessionStorage.getItem('exam:candidate-mode') === '1',
+)
+
+const categoryOptions = computed(() => {
+  const options = categories.value.map(cat => ({
+    label: cat,
+    value: cat
+  }))
+  return [
+    { label: '全部', value: null },
+    ...options
+  ]
+})
+
+function handleCreate() {
+  router.push({ name: 'SkillEditorNew' })
+}
+
+function handleEdit(id: string) {
+  router.push({ name: 'SkillEditor', params: { id } })
+}
+
+/**
+ * 处理装载本地技能包
+ */
+function handleImportLocal() {
+  importLocalVisible.value = true
+}
+
+/**
+ * 处理导入 Git 技能包
+ */
+function handleImportGit() {
+  importGitVisible.value = true
+}
+
+/**
+ * 处理导入压缩包技能
+ */
+function handleImportUpload() {
+  importUploadVisible.value = true
+}
+
+/**
+ * 处理关联工具
+ */
+function handleToolLink(id: string) {
+  toolLinkSkillId.value = id
+  toolLinkVisible.value = true
+}
+
+/**
+ * 处理查看
+ */
+async function handleView(id: string) {
+  if (scoreReviewMode.value) {
+    await router.push({ name: 'SkillEditor', params: { id } })
+    return
+  }
+  const response = await skillApi.detail(id)
+  const data = response.data.data
+
+  ApboaModalApi.open({
+    title: '技能包详情',
+    titleIcon: AppstoreOutlined,
+    footer: null,
+    content: h('div', {}, [
+      h('p', {}, [h('strong', '关联智能体: '), data.used?.length ? data.used.join('、') : '无']),
+      h('p', {}, [h('strong', '分类: '), data.category]),
+      h('p', {}, [h('strong', '名称: '), data.name]),
+      h('p', {}, [h('strong', '描述: '), data.description]),
+      h('p', {}, [h('strong', '是否关联工具: '), data.tools?.length ? '是' : '否']),
+    ])
+  })
+}
+
+/**
+ * 重置列表状态并重建 InfiniteLoading 组件
+ */
+function resetListAndRebuild() {
+  list.value = [];
+  store.resetPagination();
+  isFirstLoad.value = true;
+  infiniteLoadingKey.value++;
+}
+
+/**
+ * 处理删除
+ */
+async function handleDelete(id: string) {
+  const used = await store.checkUsedWithAgent(id)
+  if (used.length > 0) {
+    Modal.confirm({
+      title: '二次确认',
+      content: `该技能包正在被 [ ${used.join('、')} ] 智能体引用，删除后可能会影响上述智能体的正常使用！`,
+      okText: '确认并继续删除',
+      onOk: async () => {
+        await store.deleteConfig(id)
+        resetListAndRebuild()
+      }
+    })
+    return
+  }
+
+  Modal.confirm({
+    title: '确认删除',
+    content: '删除后无法恢复,是否继续?',
+    onOk: async () => {
+      await store.deleteConfig(id)
+      resetListAndRebuild()
+    }
+  })
+}
+
+/**
+ * 处理设置分类（刷新分类列表和卡片数据）
+ */
+async function handleSetCategory() {
+  await store.fetchCategories()
+  await store.resetAndFetch()
+  isFirstLoad.value = true
+  infiniteLoadingKey.value++
+}
+
+/**
+ * 处理导入成功：切换到导入分类并主动刷新列表（避免分类筛选 + InfiniteLoading 未重载导致不可见）
+ */
+async function handleImportSuccess(importCategory?: string) {
+  await store.fetchCategories()
+  keyword.value = ''
+  store.setKeyword('')
+  store.setCategory(importCategory ?? null)
+  await store.resetAndFetch()
+  isFirstLoad.value = true
+  infiniteLoadingKey.value++
+}
+
+/**
+ * 处理关联工具成功
+ */
+function handleToolLinkSuccess() {
+  resetListAndRebuild()
+}
+
+/**
+ * 处理搜索
+ */
+function handleSearch() {
+  store.setKeyword(keyword.value)
+}
+
+/**
+ * 处理状态
+ */
+async function handleEnable(id: string) {
+  const response = await skillApi.detail(id)
+  const { enabled } = response.data.data
+
+  const used = await store.checkUsedWithAgent(id)
+  if (used.length > 0 && enabled) {
+    Modal.confirm({
+      title: '二次确认',
+      content: `该技能包正在被 [ ${used.join('、')} ] 智能体引用，禁用后可能会影响上述智能体的正常使用！`,
+      okText: '确认并继续',
+      onOk: async () => {
+        await store.toggleEnabled(id, !enabled)
+      }
+    })
+    return
+  }
+
+  await store.toggleEnabled(id, !enabled)
+}
+
+/**
+ * 处理无限加载
+ *
+ * @param $state 加载状态对象
+ */
+async function handleInfiniteLoading($state: {
+  loaded: () => void;
+  complete: () => void;
+  error: () => void;
+}) {
+  // 首次加载使用 page=1，后续使用 loadMore
+  if (isFirstLoad.value) {
+    isFirstLoad.value = false;
+    if (list.value.length > 0) {
+      // 如果已有数据（如从缓存恢复），直接完成
+      $state.loaded();
+      return;
+    }
+    try {
+      await store.fetchPage(1);
+      if (hasMore.value) {
+        $state.loaded();
+      } else {
+        $state.complete();
+      }
+    } catch {
+      // 失败时重置首次加载标记，确保重试走正确的首次加载路径
+      isFirstLoad.value = true;
+      $state.error();
+    }
+    return;
+  }
+
+  // 非首次加载，使用 loadMore 加载下一页
+  if (!hasMore.value || loading.value) {
+    $state.complete();
+    return;
+  }
+
+  try {
+    await store.loadMore();
+    if (hasMore.value) {
+      $state.loaded();
+    } else {
+      $state.complete();
+    }
+  } catch {
+    $state.error();
+  }
+}
+
+/**
+ * 是否首次加载
+ */
+const isFirstLoad = ref(true);
+
+/**
+ * 监听筛选条件变化，重置状态并重建 InfiniteLoading
+ */
+watch([selectedCategory, keyword], () => {
+  // 重置列表和分页状态
+  list.value = [];
+  store.resetPagination();
+  // 重置首次加载标志
+  isFirstLoad.value = true;
+  // 强制重建 InfiniteLoading 组件
+  infiniteLoadingKey.value++;
+});
+
+onMounted(() => {
+  store.fetchCategories()
+  store.resetAndFetch()
+})
+</script>
+
+<template>
+  <div class="skill-page">
+    <section class="intro-section">
+      <h3 class="intro-title">技能包管理</h3>
+      <p class="intro-desc text-secondary">
+        技能管理是智能体的“专业能力装配中心”，通过模块化、可插拔的技能包体系，让智能体能够根据不同场景需求动态加载专业知识库与处理逻辑，实现从通用助手到领域专家的能力跃迁。
+      </p>
+    </section>
+
+    <section class="filter-section flex justify-end items-center gap-md">
+      <ASelect
+        v-model:value="selectedCategory"
+        placeholder="选择类型"
+        style="width: 200px; border: rgba(14,14,14,0.1) solid 1px !important; border-radius: 6px;"
+      >
+        <ASelectOption v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </ASelectOption>
+      </ASelect>
+
+      <AInput
+        v-model:value="keyword"
+        placeholder="搜索技能包名称"
+        style="width: 300px; border: rgba(14,14,14,0.1) solid 1px !important;"
+        @pressEnter="handleSearch"
+      >
+        <template #suffix>
+          <AButton type="text" size="small" @click="handleSearch">
+            <SearchOutlined />
+          </AButton>
+        </template>
+      </AInput>
+    </section>
+
+    <section class="card-section">
+      <div class="card-grid">
+        <CreateCard
+          v-if="!scoreReviewMode"
+          @click="handleCreate"
+          @importLocal="handleImportLocal"
+          @importGit="handleImportGit"
+          @importUpload="handleImportUpload"
+          v-permission="['TENANT_EDITOR','TENANT_ADMIN','TENANT_OWNER']"
+        />
+
+        <SkillCard
+          v-for="item in list"
+          :key="item.id"
+          :data="item"
+          :categories="categories"
+          :read-only="scoreReviewMode"
+          @view="handleView"
+          @edit="handleEdit"
+          @set-category="handleSetCategory"
+          @enable="handleEnable"
+          @delete="handleDelete"
+          @tool-link="handleToolLink"
+        />
+      </div>
+
+      <ApboaInfiniteLoading
+        :loading-key="infiniteLoadingKey"
+        @infinite="handleInfiniteLoading"
+      />
+    </section>
+
+    <ImportLocalForm
+      v-if="!scoreReviewMode"
+      v-model:visible="importLocalVisible"
+      :categories="categories"
+      @success="handleImportSuccess"
+    />
+
+    <ImportGitForm
+      v-if="!scoreReviewMode"
+      v-model:visible="importGitVisible"
+      @success="handleImportSuccess"
+    />
+
+    <ImportUploadForm
+      v-if="!scoreReviewMode"
+      v-model:visible="importUploadVisible"
+      :categories="categories"
+      :default-category="selectedCategory"
+      @success="handleImportSuccess"
+    />
+
+    <SkillToolLinkModal
+      v-if="!scoreReviewMode"
+      v-model:visible="toolLinkVisible"
+      :skill-id="toolLinkSkillId"
+      @success="handleToolLinkSuccess"
+    />
+  </div>
+</template>
+
+<style scoped lang="scss">
+@use '@/styles/skill/index.scss' as *;
+</style>

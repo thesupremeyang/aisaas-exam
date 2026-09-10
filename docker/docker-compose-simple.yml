@@ -1,0 +1,301 @@
+# ============================================================
+# Apboa 单机体验版（docker-compose-simple.yml）
+# 一键启动所有服务 + 中间件，用于快速体验平台
+# 使用方式：bash start-simple.sh 或 docker compose -f docker-compose-simple.yml up -d
+# 注意：此模式不推荐生产使用
+# ============================================================
+
+services:
+  # ==================== MySQL ====================
+  apboa-mysql:
+    image: ${DOCKER_REGISTRY}mysql:8.0
+    container_name: apboa-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - ${DATA_PATH:-./data}/mysql_data:/var/lib/mysql
+      - ../sql/once_db_init/db_init.sql:/docker-entrypoint-initdb.d/db_init.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - apboa_simple
+
+  # ==================== Redis ====================
+  apboa-redis:
+    image: ${DOCKER_REGISTRY}redis:7-alpine
+    container_name: apboa-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: Asia/Shanghai
+    command: sh -c "redis-server --requirepass $$REDIS_PASSWORD"
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ${DATA_PATH:-./data}/redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - apboa_simple
+
+  # ==================== pgvector（向量库） ====================
+  apboa-pgvector:
+    image: ${DOCKER_REGISTRY}pgvector/pgvector:pg16
+    container_name: apboa-pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DATABASE}
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      TZ: Asia/Shanghai
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - ${DATA_PATH:-./data}/pgvector_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - apboa_simple
+
+  # ==================== 管理控制台（runner-console） ====================
+  apboa-console:
+    build:
+      context: ..
+      dockerfile: docker/console/Dockerfile
+      args:
+        MAVEN_IMAGE: ${DOCKER_REGISTRY}maven:3.9-eclipse-temurin-21
+        JRE_IMAGE: ${DOCKER_REGISTRY}eclipse-temurin:21-jre
+    container_name: apboa-console
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${CONSOLE_MEM_LIMIT:-2g}
+    cpus: ${CONSOLE_CPU_LIMIT:-4}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      MYSQL_HOST: apboa-mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: apboa-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DATABASE: ${REDIS_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      CONSOLE_JAVA_HEAP_PERCENTAGE: ${CONSOLE_JAVA_HEAP_PERCENTAGE:-75.0}
+      WEBSOCKET_ENABLED: ${WEBSOCKET_ENABLED:-true}
+      WEBSOCKET_HOST: ${WEBSOCKET_HOST:-apboa-websocket}
+      WEBSOCKET_PORT: ${WEBSOCKET_PORT:-3064}
+      TZ: Asia/Shanghai
+    volumes:
+      - ${LOG_PATH:-./logs}/console:/app/logs
+      - ${DATA_PATH:-./data}/.apboa:/app/.apboa
+    depends_on:
+      apboa-mysql:
+        condition: service_healthy
+      apboa-redis:
+        condition: service_healthy
+    networks:
+      - apboa_simple
+
+  # ==================== AI 运行时（runner-runtime） ====================
+  apboa-runtime:
+    build:
+      context: ..
+      dockerfile: docker/runtime/Dockerfile
+      args:
+        MAVEN_IMAGE: ${DOCKER_REGISTRY}maven:3.9-eclipse-temurin-21
+        JRE_IMAGE: ${DOCKER_REGISTRY}eclipse-temurin:21-jre
+    container_name: apboa-runtime
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${RUNTIME_MEM_LIMIT:-4g}
+    cpus: ${RUNTIME_CPU_LIMIT:-4}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      MYSQL_HOST: apboa-mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: apboa-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DATABASE: ${REDIS_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      VECTOR_STORE_TYPE: ${VECTOR_STORE_TYPE}
+      PG_HOST: apboa-pgvector
+      PG_PORT: "5432"
+      PG_DATABASE: ${PG_DATABASE}
+      PG_USER: ${PG_USER}
+      PG_PASSWORD: ${PG_PASSWORD}
+      SHELL_PROXY_ENABLED: "true"
+      PROXY_HOST: apboa-proxy
+      PROXY_PORT: "3062"
+      CONSOLE_HOST: apboa-console
+      RUNTIME_JAVA_HEAP_PERCENTAGE: ${RUNTIME_JAVA_HEAP_PERCENTAGE:-75.0}
+      WEBSOCKET_ENABLED: ${WEBSOCKET_ENABLED:-true}
+      WEBSOCKET_HOST: ${WEBSOCKET_HOST:-apboa-websocket}
+      WEBSOCKET_PORT: ${WEBSOCKET_PORT:-3064}
+      WORKSPACE_CAPACITY_MB: ${WORKSPACE_CAPACITY_MB:-30}
+      APBOA_NODE_ID: ${APBOA_NODE_ID}
+      APBOA_HOST_NAME: ${APBOA_HOST_NAME}
+      APBOA_HOST_IP: ${APBOA_HOST_IP}
+      TZ: Asia/Shanghai
+    volumes:
+      - ${LOG_PATH:-./logs}/runtime:/app/logs
+      - ${DATA_PATH:-./data}/.apboa:/app/.apboa
+    depends_on:
+      apboa-mysql:
+        condition: service_healthy
+      apboa-redis:
+        condition: service_healthy
+      apboa-pgvector:
+        condition: service_healthy
+    networks:
+      - apboa_simple
+
+  # ==================== Shell 执行代理（runner-proxy） ====================
+  apboa-proxy:
+    build:
+      context: ..
+      dockerfile: docker/proxy/Dockerfile
+      args:
+        MAVEN_IMAGE: ${DOCKER_REGISTRY}maven:3.9-eclipse-temurin-21
+        JRE_IMAGE: ${DOCKER_REGISTRY}eclipse-temurin:21-jre
+    container_name: apboa-proxy
+    restart: unless-stopped
+    # 安全加固：Shell 代理执行不可信命令，必须严格限制
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:exec
+    working_dir: /tmp
+    mem_limit: ${SHELLPROXY_MEM_LIMIT:-1g}
+    cpus: ${SHELLPROXY_CPU_LIMIT:-2}
+    pids_limit: ${SHELLPROXY_PIDS_LIMIT:-200}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      JAVA_TOOL_OPTIONS: "-Djava.io.tmpdir=/tmp -Dspring.pid.file="
+      CONSOLE_HOST: apboa-console
+      SHELL_DEFAULT_TIMEOUT: ${SHELLPROXY_DEFAULT_TIMEOUT:-300}
+      SHELL_MAX_TIMEOUT: ${SHELLPROXY_MAX_TIMEOUT:-3600}
+      SHELL_MAX_OUTPUT_SIZE: ${SHELLPROXY_MAX_OUTPUT_SIZE:-52428800}
+      SHELLPROXY_JAVA_HEAP_PERCENTAGE: ${SHELLPROXY_JAVA_HEAP_PERCENTAGE:-50.0}
+      APBOA_NODE_ID: ${APBOA_NODE_ID}
+      APBOA_HOST_NAME: ${APBOA_HOST_NAME}
+      APBOA_HOST_IP: ${APBOA_HOST_IP}
+      TZ: Asia/Shanghai
+    volumes:
+      - ${LOG_PATH:-./logs}/proxy:/app/logs
+      - ${DATA_PATH:-./data}/.apboa:/app/.apboa
+    networks:
+      - apboa_simple
+
+  # ==================== WebSocket 推送服务（runner-websocket） ====================
+  apboa-websocket:
+    build:
+      context: ..
+      dockerfile: docker/websocket/Dockerfile
+      args:
+        MAVEN_IMAGE: ${DOCKER_REGISTRY}maven:3.9-eclipse-temurin-21
+        JRE_IMAGE: ${DOCKER_REGISTRY}eclipse-temurin:21-jre
+    container_name: apboa-websocket
+    restart: unless-stopped
+    mem_limit: ${WEBSOCKET_MEM_LIMIT:-1g}
+    cpus: ${WEBSOCKET_CPU_LIMIT:-2}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      REDIS_HOST: apboa-redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DATABASE: ${REDIS_DATABASE}
+      CONSOLE_HOST: ${CONSOLE_HOST:-apboa-console}
+      WEBSOCKET_JAVA_HEAP_PERCENTAGE: ${WEBSOCKET_JAVA_HEAP_PERCENTAGE:-50.0}
+      TZ: Asia/Shanghai
+    ports:
+      - "${WEBSOCKET_PORT:-3064}:3064"
+    depends_on:
+      apboa-redis:
+        condition: service_healthy
+    networks:
+      - apboa_simple
+
+  # ==================== 前端（Nginx） ====================
+  apboa-frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend/Dockerfile
+      args:
+        NODE_IMAGE: ${DOCKER_REGISTRY}node:22
+        NGINX_IMAGE: ${DOCKER_REGISTRY}nginx:alpine
+        VITE_APP_BASE_API: ${VITE_APP_BASE_API}
+        VITE_APP_CONTEXT_PATH: ${VITE_APP_CONTEXT_PATH}
+    container_name: apboa-frontend
+    restart: unless-stopped
+    # nginx.conf 使用 envsubst 替换 runtime 地址变量
+    environment:
+      RUNTIME_HOST: apboa-runtime
+      RUNTIME_PORT: "3061"
+      WEBSOCKET_HOST: apboa-websocket
+      WEBSOCKET_PORT: "3064"
+    entrypoint: >
+      /bin/sh -c "
+        envsubst '$$RUNTIME_HOST $$RUNTIME_PORT $$WEBSOCKET_HOST $$WEBSOCKET_PORT' < /etc/nginx/conf.d/default.conf > /etc/nginx/conf.d/default.conf.tmp &&
+        mv /etc/nginx/conf.d/default.conf.tmp /etc/nginx/conf.d/default.conf &&
+        nginx -g 'daemon off;'
+      "
+    volumes:
+      - ${LOG_PATH:-./logs}/frontend:/var/log/nginx
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - apboa-console
+      - apboa-runtime
+    networks:
+      - apboa_simple
+
+networks:
+  apboa_simple:
+    name: apboa_simple
+    driver: bridge

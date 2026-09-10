@@ -1,0 +1,12 @@
+[unplugin-vue-components] component "ChatMain"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/chatHistory/ChatMain.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "ChatSidebar"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/chatHistory/ChatSidebar.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "MessageItem"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/chatHistory/MessageItem.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "MessageList"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/chatHistory/MessageList.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "SessionItem"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/chatHistory/SessionItem.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "SessionList"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/chatHistory/SessionList.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "CreateCard"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/knowledge/CreateCard.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "CreateCard"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/mcp/CreateCard.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "CreateCard"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/prompt/CreateCard.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "CreateCard"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/sensitive/CreateCard.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "CreateCard"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/skill/CreateCard.vue) has naming conflicts with other components, ignored.
+[unplugin-vue-components] component "CreateCard"(C:/Users/Administrator/Desktop/分析系统/apboa-next-master/ui/src/components/tool/CreateCard.vue) has naming conflicts with other components, ignored.

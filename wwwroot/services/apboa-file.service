@@ -1,0 +1,21 @@
+[Unit]
+Description=Apboa File Sync (技能文件同步 :3063)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apboa
+Group=apboa
+WorkingDirectory=/wwwroot
+EnvironmentFile=/wwwroot/apboa.env
+Environment=SPRING_PROFILES_ACTIVE=docker
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /wwwroot/jars/runner-file-1.0-SNAPSHOT.jar
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,128 @@
+.workspace-v3-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  padding-left: 226px;
+  background: rgba(21, 31, 49, 0.08);
+  backdrop-filter: blur(2px);
+}
+
+.workspace-v3-panel {
+  width: 360px;
+  margin-left: 14px;
+  padding: 20px;
+  border: 1px solid rgba(211, 224, 244, 0.95);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 24px 70px rgba(30, 61, 107, 0.2);
+  animation: workspace-v3-in 0.2s ease-out;
+}
+
+@keyframes workspace-v3-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.workspace-v3-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+
+  span {
+    color: #87a0c4;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  h2 {
+    margin: 3px 0 2px;
+    color: #1e2d45;
+    font-size: 18px;
+  }
+
+  p {
+    margin: 0;
+    color: #8a97aa;
+    font-size: 11px;
+  }
+
+  button {
+    width: 30px;
+    height: 30px;
+    border: 0;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    color: #8190a5;
+    background: #f1f5fa;
+    cursor: pointer;
+  }
+}
+
+.workspace-v3-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+
+  button {
+    min-height: 58px;
+    padding: 9px 10px;
+    border: 1px solid #e6edf7;
+    border-radius: 11px;
+    display: grid;
+    grid-template-columns: 31px minmax(0, 1fr) 10px;
+    align-items: center;
+    gap: 8px;
+    color: #4f5e73;
+    background: #fbfdff;
+    font-size: 11px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.18s ease;
+
+    &:hover,
+    &.active {
+      border-color: #c5d9f7;
+      color: #2563eb;
+      background: #f2f7ff;
+      transform: translateY(-1px);
+    }
+
+    > .anticon {
+      color: #a1adbd;
+      font-size: 9px;
+    }
+  }
+}
+
+.workspace-v3-grid-icon {
+  width: 31px;
+  height: 31px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: #eef4fc;
+  font-size: 15px;
+}
+
+@media (max-width: 768px) {
+  .workspace-v3-overlay {
+    align-items: flex-end;
+    padding: 14px;
+  }
+
+  .workspace-v3-panel {
+    width: 100%;
+    margin: 0;
+  }
+}

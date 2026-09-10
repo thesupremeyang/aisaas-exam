@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 · 国产大模型应用与AI编程智能体开发考试平台</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC",
+                   "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+                   sans-serif;
+      -webkit-font-smoothing: antialiased;
+      color: #1f2937;
+    }
+
+    /* ========== 背景 ========== */
+    .login-page {
+      position: relative;
+      min-height: 100vh;
+      width: 100%;
+      overflow: hidden;
+      /* 基调围绕 PNG 主色 #275ee3 展开，左侧 hero 区域与插图背景自然衔接 */
+      background:
+        radial-gradient(circle at 28% 48%, rgba(96, 165, 250, 0.28) 0%, transparent 46%),
+        radial-gradient(circle at 78% 22%, rgba(37, 99, 235, 0.22) 0%, transparent 42%),
+        radial-gradient(circle at 85% 82%, rgba(59, 130, 246, 0.22) 0%, transparent 48%),
+        linear-gradient(135deg, #1e3a8a 0%, #275ee3 36%, #2563eb 62%, #3b82f6 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 24px 32px;
+    }
+
+    /* ========== 波纹动效层 ========== */
+    .ripple-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+
+    /* 圆形波纹扩散 */
+    .ripple {
+      position: absolute;
+      border-radius: 50%;
+      border: 1.5px solid rgba(255, 255, 255, 0.18);
+      animation: ripple-spread 7s ease-out infinite;
+    }
+    .ripple-1 { width: 120px; height: 120px; left: 6%;  top: 58%; animation-delay: 0s; }
+    .ripple-2 { width: 160px; height: 160px; left: 72%; top: 22%; animation-delay: 2.3s; }
+    .ripple-3 { width: 90px;  height: 90px;  left: 42%; top: 78%; animation-delay: 4.6s; }
+
+    @keyframes ripple-spread {
+      0%   { transform: scale(0.25); opacity: 0; }
+      15%  { opacity: 0.7; }
+      100% { transform: scale(3.2); opacity: 0; }
+    }
+
+    /* 底部波浪 */
+    .wave {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 200%;
+      height: 110px;
+      animation: wave-move 14s linear infinite;
+    }
+    .wave-2 {
+      height: 70px;
+      opacity: 0.5;
+      animation: wave-move 20s linear infinite reverse;
+    }
+    .wave path { fill: rgba(255, 255, 255, 0.06); }
+
+    @keyframes wave-move {
+      0%   { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+
+    /* ========== 顶部品牌 ========== */
+    .brand-header {
+      text-align: center;
+      color: #fff;
+      position: relative;
+      z-index: 2;
+      margin-bottom: 36px;
+    }
+    .brand-title {
+      font-size: 30px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      color: #ffffff;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+      margin-top: 16px;
+      margin-bottom: 8px;
+    }
+    .brand-subtitle {
+      font-size: 13px;
+      letter-spacing: 6px;
+      color: rgba(255, 255, 255, 0.78);
+      font-weight: 300;
+      text-transform: uppercase;
+    }
+
+    /* ========== 主体两栏 ========== */
+    .content {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 80px;
+      flex: 1;
+      width: 100%;
+      max-width: 1280px;
+      padding: 12px;
+    }
+
+    .hero {
+      flex: 1.1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hero img {
+      width: 100%;
+      max-width: 560px;
+      height: auto;
+      /* 羽化边缘：径向遮罩让图片四周淡出到透明，消除硬矩形边界 */
+      -webkit-mask-image: radial-gradient(ellipse 68% 68% at 50% 50%,
+                                          #000 58%, rgba(0,0,0,0.8) 75%, transparent 94%);
+              mask-image: radial-gradient(ellipse 68% 68% at 50% 50%,
+                                          #000 58%, rgba(0,0,0,0.8) 75%, transparent 94%);
+      /* 背景已按 PNG 主色 #275ee3 校准，使用正常混合保持插画原色 */
+      mix-blend-mode: normal;
+      filter: drop-shadow(0 10px 30px rgba(13, 35, 95, 0.22)) saturate(1.02);
+    }
+
+    .card-wrapper {
+      flex: 0 0 420px;
+      max-width: 420px;
+    }
+
+    /* ========== 卡片 ========== */
+    .card {
+      position: relative;
+      background: #ffffff;
+      border-radius: 14px;
+      box-shadow:
+        0 1px 3px rgba(15, 23, 42, 0.05),
+        0 12px 36px rgba(15, 23, 42, 0.18);
+      padding: 32px 36px 28px;
+    }
+
+    /* 卡片右上角装饰 */
+    .card-corner {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 84px;
+      height: 84px;
+      pointer-events: none;
+      opacity: 0.85;
+    }
+    .card-corner svg { width: 100%; height: 100%; }
+
+    /* ========== Tab 栏 ========== */
+    .tab-bar {
+      display: flex;
+      gap: 28px;
+      border-bottom: 1px solid #eef0f4;
+      margin-bottom: 26px;
+    }
+    .tab {
+      position: relative;
+      font-size: 16px;
+      font-weight: 600;
+      color: #94a3b8;
+      padding: 8px 4px 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .tab.active {
+      color: #2563eb;
+    }
+    .tab.active::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: -1px;
+      height: 2px;
+      background: #2563eb;
+      border-radius: 2px;
+    }
+
+    /* ========== 表单 ========== */
+    .field {
+      position: relative;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 14px 4px 12px;
+      transition: border-color 0.2s ease;
+      margin-bottom: 6px;
+    }
+    .field:hover {
+      border-bottom-color: #93c5fd;
+    }
+    .field:focus-within {
+      border-bottom-color: #2563eb;
+    }
+    .field .leading {
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+      margin-right: 10px;
+      color: #94a3b8;
+    }
+    .field .leading svg { width: 100%; height: 100%; }
+    .field input {
+      flex: 1;
+      border: 0;
+      outline: 0;
+      font-size: 15px;
+      color: #1f2937;
+      background: transparent;
+      padding: 4px 0;
+    }
+    .field input::placeholder {
+      color: #cbd5e1;
+      font-weight: 300;
+    }
+    .field .toggle {
+      cursor: pointer;
+      color: #94a3b8;
+      display: inline-flex;
+      align-items: center;
+    }
+    .field .toggle svg { width: 18px; height: 18px; }
+
+    .form-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 14px 0 22px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .form-actions a, .form-actions label a {
+      color: #2563eb;
+      cursor: pointer;
+    }
+    .form-actions a:hover {
+      text-decoration: underline;
+    }
+    .remember {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .remember input {
+      width: 14px;
+      height: 14px;
+      accent-color: #2563eb;
+    }
+
+    /* ========== 登录按钮 ========== */
+    .btn-login {
+      width: 100%;
+      height: 48px;
+      border: 0;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 8px;
+      color: #ffffff;
+      cursor: pointer;
+      background: linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%);
+      box-shadow: 0 6px 18px rgba(96, 165, 250, 0.4);
+      transition: transform 0.15s ease, box-shadow 0.2s ease;
+    }
+    .btn-login:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 22px rgba(96, 165, 250, 0.55);
+    }
+    .btn-login:active {
+      transform: translateY(0);
+    }
+
+    /* ========== 卡片底部 ========== */
+    .card-foot {
+      margin-top: 18px;
+      text-align: left;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .card-foot a {
+      color: #2563eb;
+      cursor: pointer;
+    }
+    .card-foot a:hover { text-decoration: underline; }
+
+    /* ========== 底部 ========== */
+    .footer-tip {
+      position: relative;
+      z-index: 2;
+      margin-top: 32px;
+      padding: 8px 18px;
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(6px);
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 13px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ========== 响应式 ========== */
+    @media (max-width: 1024px) {
+      .content {
+        flex-direction: column;
+        gap: 28px;
+      }
+      .hero { display: none; }
+      .card-wrapper {
+        flex: 1;
+        max-width: 440px;
+        width: 100%;
+      }
+      .brand-title {
+        font-size: 22px;
+        letter-spacing: 2px;
+      }
+      .brand-subtitle {
+        letter-spacing: 3px;
+        font-size: 11px;
+      }
+    }
+    @media (max-width: 480px) {
+      .login-page { padding: 24px 16px; }
+      .card { padding: 26px 22px 22px; }
+      .brand-title { font-size: 18px; letter-spacing: 1px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="login-page">
+    <!-- 波纹动效层 -->
+    <div class="ripple-layer" aria-hidden="true">
+      <!-- 圆形波纹扩散 -->
+      <span class="ripple ripple-1"></span>
+      <span class="ripple ripple-2"></span>
+      <span class="ripple ripple-3"></span>
+      <!-- 底部波浪 -->
+      <svg class="wave" viewBox="0 0 1440 110" preserveAspectRatio="none">
+        <path d="M0,55 C240,95 480,15 720,55 C960,95 1200,15 1440,55 L1440,110 L0,110 Z"/>
+        <path d="M0,55 C240,95 480,15 720,55 C960,95 1200,15 1440,55 L1440,110 L0,110 Z" transform="translate(1440,0)"/>
+      </svg>
+      <svg class="wave wave-2" viewBox="0 0 1440 70" preserveAspectRatio="none">
+        <path d="M0,35 C240,60 480,10 720,35 C960,60 1200,10 1440,35 L1440,70 L0,70 Z"/>
+        <path d="M0,35 C240,60 480,10 720,35 C960,60 1200,10 1440,35 L1440,70 L0,70 Z" transform="translate(1440,0)"/>
+      </svg>
+    </div>
+
+    <!-- 顶部品牌 -->
+    <header class="brand-header">
+      <h1 class="brand-title">国产大模型应用与AI编程智能体开发考试平台</h1>
+      <p class="brand-subtitle">Domestic LLM &amp; AI Agent Certification Platform</p>
+    </header>
+
+    <!-- 主体两栏 -->
+    <main class="content">
+      <!-- 左侧插画 -->
+      <section class="hero" aria-hidden="true">
+        <img src="login-hero.png" alt="平台插画" />
+      </section>
+
+      <!-- 右侧登录卡 -->
+      <section class="card-wrapper">
+        <div class="card">
+          <!-- 卡片右上角装饰 -->
+          <div class="card-corner" aria-hidden="true">
+            <svg viewBox="0 0 84 84">
+              <g fill="none" stroke="#bfdbfe" stroke-width="1.4">
+                <rect x="56" y="6" width="22" height="22"/>
+                <rect x="62" y="12" width="10" height="10"/>
+                <rect x="36" y="26" width="10" height="10"/>
+                <rect x="46" y="36" width="6" height="6"/>
+              </g>
+            </svg>
+          </div>
+
+          <div class="tab-bar">
+            <span class="tab active">密码登录</span>
+            <!-- 暂不接入短信登录，仅保持一个 Tab -->
+          </div>
+
+          <form onsubmit="event.preventDefault(); alert('此为 HTML 原型，登录功能由源代码实现');">
+            <div class="field">
+              <span class="leading">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="8" r="4"/>
+                  <path d="M4 21c0-4 4-7 8-7s8 3 8 7"/>
+                </svg>
+              </span>
+              <input type="text" placeholder="请输入账号" autocomplete="username" />
+            </div>
+
+            <div class="field">
+              <span class="leading">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="11" width="16" height="10" rx="2"/>
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                </svg>
+              </span>
+              <input type="password" placeholder="请输入密码" autocomplete="current-password" />
+              <span class="toggle" title="显示/隐藏密码">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              </span>
+            </div>
+
+            <div class="form-actions">
+              <label class="remember">
+                <input type="checkbox" /> 记住密码
+              </label>
+              <a onclick="alert('原型：跳到忘记密码页 (源代码实现)')">忘记密码？</a>
+            </div>
+
+            <button type="submit" class="btn-login">登&nbsp;&nbsp;录</button>
+
+            <div class="card-foot">
+              还没有账号？ <a onclick="alert('原型：跳到注册页 (源代码实现)')">立即注册</a>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <!-- 底部提示 -->
+    <footer class="footer-tip">
+      推荐使用 Chrome、Edge、360 极速 等现代浏览器访问
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>星图 AI 登录页 v5 静态稿</title>
+  <style>
+    :root {
+      --blue: #2f73d9;
+      --blue-dark: #245fb8;
+      --blue-soft: #eaf3ff;
+      --ink: #111827;
+      --muted: #687386;
+      --line: #e3eaf5;
+      --panel: rgba(255, 255, 255, 0.72);
+      --card: #ffffff;
+      --shadow: 0 24px 70px rgba(47, 115, 217, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: Inter, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      letter-spacing: 0;
+      background: #f7fbff;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .login-page {
+      min-height: 100vh;
+      position: relative;
+      overflow: hidden;
+      padding: 22px 32px;
+      background:
+        linear-gradient(180deg, rgba(247, 251, 255, 0.76), rgba(245, 249, 255, 0.94)),
+        url("../ui/public/media/flowing-blue-waves-poster.jpg") center top / cover no-repeat;
+    }
+
+    .login-page::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 14% 24%, rgba(47, 115, 217, 0.12), transparent 24%),
+        radial-gradient(circle at 88% 20%, rgba(255, 255, 255, 0.88), transparent 32%),
+        linear-gradient(90deg, rgba(219, 237, 255, 0.72), rgba(255, 255, 255, 0.32) 52%, rgba(219, 237, 255, 0.68));
+      pointer-events: none;
+      animation: backgroundDrift 14s ease-in-out infinite alternate;
+    }
+
+    .page-inner {
+      position: relative;
+      z-index: 1;
+      height: calc(100vh - 44px);
+      display: grid;
+      grid-template-rows: 50px minmax(0, 1fr);
+      gap: 14px;
+      overflow: hidden;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: fit-content;
+      animation: fadeSlideDown 0.72s cubic-bezier(.16, 1, .3, 1) both;
+    }
+
+    .brand img {
+      width: 42px;
+      height: 42px;
+      object-fit: contain;
+    }
+
+    .brand b {
+      font-size: 22px;
+      line-height: 1;
+      font-weight: 850;
+      color: #172033;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 500px;
+      gap: 28px;
+      min-height: 0;
+      align-items: stretch;
+    }
+
+    .left-stage {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 112px minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .creator-banner {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      align-items: center;
+      gap: 22px;
+      padding: 14px 34px;
+      border: 1px solid rgba(255, 255, 255, 0.92);
+      border-radius: 28px;
+      background: rgba(232, 246, 255, 0.58);
+      box-shadow: 0 18px 50px rgba(47, 115, 217, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(24px) saturate(1.2);
+      -webkit-backdrop-filter: blur(24px) saturate(1.2);
+      animation: fadeSlideUp 0.78s cubic-bezier(.16, 1, .3, 1) 0.08s both;
+    }
+
+    .creator-banner img {
+      width: 66px;
+      height: 66px;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 18px rgba(47, 115, 217, 0.18));
+      justify-self: center;
+      animation: mascotFloat 3.8s ease-in-out infinite;
+    }
+
+    .creator-banner h1 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.25;
+      font-weight: 850;
+      color: #111827;
+    }
+
+    .creator-banner p {
+      margin: 5px 0 0;
+      color: #7a8495;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .intro-panel {
+      min-height: 0;
+      padding: 26px 28px;
+      border: 1px solid rgba(255, 255, 255, 0.92);
+      border-radius: 30px;
+      background: rgba(255, 255, 255, 0.62);
+      box-shadow: var(--shadow), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(24px) saturate(1.18);
+      -webkit-backdrop-filter: blur(24px) saturate(1.18);
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 16px;
+      overflow: hidden;
+      animation: fadeSlideUp 0.82s cubic-bezier(.16, 1, .3, 1) 0.16s both;
+    }
+
+    .intro-hero {
+      max-width: 980px;
+    }
+
+    .intro-kicker {
+      width: fit-content;
+      margin-bottom: 10px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      border: 1px solid #d6e8ff;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .intro-hero h2 {
+      margin: 0;
+      color: #111827;
+      font-size: 26px;
+      line-height: 1.25;
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+
+    .intro-hero p {
+      max-width: 900px;
+      margin: 12px 0 0;
+      color: #5f6b7c;
+      font-size: 15px;
+      line-height: 1.68;
+    }
+
+    .module-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .module-strip span {
+      height: 31px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 11px;
+      border-radius: 999px;
+      color: #42617f;
+      background: #ffffffc7;
+      border: 1px solid #dfe9f5;
+      font-size: 13px;
+      font-weight: 650;
+      box-shadow: 0 8px 18px rgba(47, 115, 217, 0.06);
+    }
+
+    .feature-grid {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-content: stretch;
+    }
+
+    .feature-card {
+      min-height: 0;
+      padding: 16px;
+      border: 1px solid #e7edf6;
+      border-radius: 20px;
+      background: #ffffffd9;
+      box-shadow: 0 18px 44px rgba(22, 41, 75, 0.08);
+      transition: transform .34s cubic-bezier(.16, 1, .3, 1), border-color .24s ease, box-shadow .34s ease;
+      animation: cardRise 0.64s cubic-bezier(.16, 1, .3, 1) both;
+    }
+
+    .feature-card:nth-child(1) { animation-delay: .22s; }
+    .feature-card:nth-child(2) { animation-delay: .28s; }
+    .feature-card:nth-child(3) { animation-delay: .34s; }
+    .feature-card:nth-child(4) { animation-delay: .40s; }
+
+    .feature-card:hover {
+      transform: translateY(-6px) scale(1.012);
+      border-color: #8db7e9;
+      box-shadow: 0 24px 50px rgba(29, 77, 133, 0.16), 0 0 0 5px rgba(47, 115, 217, 0.08);
+    }
+
+    .feature-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 7px;
+    }
+
+    .feature-head h3 {
+      margin: 0;
+      color: #172033;
+      font-size: 17px;
+      line-height: 1.25;
+      font-weight: 850;
+    }
+
+    .feature-card p {
+      margin: 0;
+      color: #5f6b7c;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .badge {
+      width: 26px;
+      height: 26px;
+      flex: none;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: 0 10px 18px rgba(31, 80, 160, 0.18);
+    }
+
+    .login-card {
+      align-self: stretch;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      border-radius: 34px;
+      border: 1px solid rgba(229, 236, 247, 0.94);
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 28px 80px rgba(31, 57, 100, 0.12);
+      backdrop-filter: blur(24px) saturate(1.2);
+      -webkit-backdrop-filter: blur(24px) saturate(1.2);
+      animation: loginEnter 0.82s cubic-bezier(.16, 1, .3, 1) 0.14s both;
+    }
+
+    .login-card::before {
+      content: "";
+      position: absolute;
+      left: 24px;
+      right: 24px;
+      top: 0;
+      height: 10px;
+      border-radius: 0 0 10px 10px;
+      background: linear-gradient(90deg, #2f73d9, #9fd0ff);
+    }
+
+    .login-inner {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 34px 38px 24px;
+    }
+
+    .login-inner h2 {
+      margin: 0 0 20px;
+      color: #111827;
+      font-size: 26px;
+      line-height: 1.25;
+      font-weight: 850;
+      text-align: center;
+    }
+
+    .form {
+      display: grid;
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 10px;
+    }
+
+    .field label {
+      color: #374151;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .control {
+      height: 50px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 0 18px;
+      border: 1px solid #dfe5ef;
+      border-radius: 16px;
+      background: #fff;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .control:focus-within {
+      border-color: #9bc3f3;
+      box-shadow: 0 0 0 4px rgba(47, 115, 217, 0.12);
+    }
+
+    .control svg {
+      width: 22px;
+      height: 22px;
+      color: #9aa3b2;
+      flex: none;
+    }
+
+    .control input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      color: #1f2937;
+      background: transparent;
+      font-size: 15px;
+    }
+
+    .control input::placeholder {
+      color: #858c98;
+    }
+
+    .form-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 2px 0 6px;
+      color: #6b7280;
+      font-size: 14px;
+    }
+
+    .remember {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .remember input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--blue);
+    }
+
+    a {
+      color: var(--blue);
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .submit {
+      height: 52px;
+      border: 0;
+      border-radius: 16px;
+      color: #fff;
+      background: var(--blue);
+      box-shadow: 0 18px 34px rgba(47, 115, 217, 0.28);
+      font-size: 16px;
+      font-weight: 850;
+      transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .submit:hover {
+      background: var(--blue-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 22px 40px rgba(47, 115, 217, 0.34);
+    }
+
+    .quick-panel {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border: 1px solid #e3eaf5;
+      border-radius: 20px;
+      background: #f8fbff;
+    }
+
+    .quick-panel h3 {
+      margin: 0 0 12px;
+      color: #1f2937;
+      font-size: 16px;
+      font-weight: 850;
+    }
+
+    .quick-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .quick-item {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 6px 10px;
+      border: 1px solid #e5ebf4;
+      border-radius: 14px;
+      background: #fff;
+      color: #536176;
+      font-size: 14px;
+      transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .quick-item:hover {
+      transform: translateX(4px);
+      border-color: #cfe0f7;
+      box-shadow: 0 10px 22px rgba(47, 115, 217, 0.08);
+    }
+
+    @keyframes backgroundDrift {
+      from { transform: translate3d(-8px, -6px, 0) scale(1); opacity: .92; }
+      to { transform: translate3d(10px, 8px, 0) scale(1.018); opacity: 1; }
+    }
+
+    @keyframes fadeSlideDown {
+      from { opacity: 0; transform: translateY(-12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes cardRise {
+      from { opacity: 0; transform: translateY(22px) scale(.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes loginEnter {
+      from { opacity: 0; transform: translateX(28px) scale(.985); }
+      to { opacity: 1; transform: translateX(0) scale(1); }
+    }
+
+    @keyframes mascotFloat {
+      0%, 100% { transform: translateY(0) rotate(-1deg); }
+      50% { transform: translateY(-7px) rotate(1deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
+
+    .quick-item .badge {
+      width: 26px;
+      height: 26px;
+      font-size: 13px;
+    }
+
+    .register {
+      margin-top: 14px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: #5f6b7c;
+      font-size: 15px;
+      border: 1px solid #dfe9f6;
+      border-radius: 14px;
+      background: #f8fbff;
+    }
+
+    .register a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 88px;
+      height: 32px;
+      padding: 0 14px;
+      color: #fff;
+      background: var(--blue);
+      border-radius: 999px;
+      box-shadow: 0 10px 20px rgba(47, 115, 217, 0.18);
+    }
+
+    @media (max-width: 1420px) {
+      .main-grid {
+        grid-template-columns: minmax(0, 1fr) 500px;
+      }
+    }
+
+    @media (max-width: 1100px) {
+      .login-page {
+        padding: 22px;
+        overflow: auto;
+      }
+
+      .page-inner {
+        height: auto;
+        overflow: visible;
+      }
+
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .login-card {
+        min-height: auto;
+      }
+    }
+
+    @media (max-height: 820px) and (min-width: 1101px) {
+      .login-inner {
+        padding: 28px 34px 20px;
+      }
+
+      .login-inner h2 {
+        margin-bottom: 16px;
+        font-size: 26px;
+      }
+
+      .form {
+        gap: 10px;
+      }
+
+      .field {
+        gap: 6px;
+      }
+
+      .control {
+        height: 46px;
+      }
+
+      .submit {
+        height: 48px;
+      }
+
+      .quick-panel {
+        margin-top: 14px;
+        padding: 12px;
+      }
+
+      .quick-panel h3 {
+        margin-bottom: 8px;
+      }
+
+      .quick-item {
+        min-height: 36px;
+        font-size: 13px;
+      }
+
+      .register {
+        margin-top: 10px;
+        font-size: 14px;
+        padding: 10px 12px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .login-page {
+        padding: 16px;
+      }
+
+      .page-inner {
+        gap: 18px;
+      }
+
+      .brand b {
+        font-size: 20px;
+      }
+
+      .left-stage {
+        grid-template-rows: auto auto;
+      }
+
+      .creator-banner {
+        grid-template-columns: 1fr;
+        text-align: center;
+        padding: 24px;
+      }
+
+      .intro-panel {
+        padding: 22px;
+        grid-template-rows: auto auto auto;
+      }
+
+      .feature-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .login-inner {
+        padding: 42px 24px 28px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="login-page">
+    <div class="page-inner">
+      <header class="brand">
+        <img src="../ui/public/assets/xingtu-logo.png" alt="星图 AI Logo" />
+        <b>星图AI智能体</b>
+      </header>
+
+      <section class="main-grid">
+        <section class="left-stage">
+          <section class="creator-banner">
+            <img src="../ui/public/assets/xiaotu-blue-v3.png" alt="小图" />
+            <div>
+              <h1>一句话，创建你的专属智能体</h1>
+              <p>登录后告诉小图你想让智能体做什么</p>
+            </div>
+          </section>
+
+          <section class="intro-panel" aria-label="平台介绍">
+            <div class="intro-hero">
+              <div class="intro-kicker">基于阿里 AgentScope 的多智能体应用开发平台</div>
+              <h2>以 Agent 为核心，把模型、工具与知识能力组装成企业级 AI 应用</h2>
+              <p>
+                星图 AI 智能体平台将模型、工具、Skill、MCP、知识库、Hook、提示词、敏感词等能力单元抽象为可独立管理、可热插拔的模块，帮助团队完成智能体设计、开发、调试、部署和运行监控。
+              </p>
+            </div>
+
+            <div class="module-strip" aria-label="能力模块">
+              <span>模型</span>
+              <span>工具</span>
+              <span>Skill</span>
+              <span>MCP</span>
+              <span>知识库</span>
+              <span>Hook</span>
+              <span>提示词</span>
+              <span>敏感词</span>
+              <span>Studio</span>
+            </div>
+
+            <div class="feature-grid">
+              <article class="feature-card">
+                <div class="feature-head">
+                  <span class="badge" style="background:#2f73d9">企</span>
+                  <h3>企业级生产底座</h3>
+                </div>
+                <p>面向 Java 企业级生产部署，支持微服务、高并发、信创环境、多租户隔离、角色权限、集群部署与容器化运行。</p>
+              </article>
+
+              <article class="feature-card">
+                <div class="feature-head">
+                  <span class="badge" style="background:#12b76a">协</span>
+                  <h3>多智能体协作</h3>
+                </div>
+                <p>支持规划师、执行者等不同角色智能体像团队一样分工配合，内置消息路由与执行流管理，处理复杂任务。</p>
+              </article>
+
+              <article class="feature-card">
+                <div class="feature-head">
+                  <span class="badge" style="background:#7c3aed">控</span>
+                  <h3>工程化可控增强</h3>
+                </div>
+                <p>通过 Hook 精细干预智能体思考与行动过程，结合状态持久化、安全沙箱和链路追踪，让生产运行可控可观测。</p>
+              </article>
+
+              <article class="feature-card">
+                <div class="feature-head">
+                  <span class="badge" style="background:#f79009">全</span>
+                  <h3>全生命周期管理</h3>
+                </div>
+                <p>覆盖设计、开发、调试、部署、监控全过程，提供 SDK 核心框架、Runtime 运行环境和 Studio 可视化能力。</p>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <aside class="login-card">
+          <div class="login-inner">
+            <h2>登录与注册</h2>
+
+            <form class="form">
+              <div class="field">
+                <label for="username">账号</label>
+                <div class="control">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+                  <input id="username" type="text" placeholder="请输入用户名或邮箱" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="password">密码</label>
+                <div class="control">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  <input id="password" type="password" placeholder="请输入密码" />
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label class="remember"><input type="checkbox" />记住账号</label>
+                <a href="#">忘记密码？</a>
+              </div>
+
+              <button class="submit" type="button">登录</button>
+            </form>
+
+            <section class="quick-panel">
+              <h3>登录后你可以</h3>
+              <div class="quick-list">
+                <div class="quick-item"><span class="badge" style="background:#2f73d9">广</span> 浏览 v5 智能体广场精选场景</div>
+                <div class="quick-item"><span class="badge" style="background:#12b76a">图</span> 使用小图对话式创建智能体</div>
+                <div class="quick-item"><span class="badge" style="background:#7c3aed">配</span> 管理我的智能体与资源配置</div>
+              </div>
+            </section>
+
+            <div class="register">
+              <span>还没有账号？</span>
+              <a href="#">立即注册</a>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

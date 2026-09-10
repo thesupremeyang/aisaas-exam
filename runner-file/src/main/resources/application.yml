@@ -1,0 +1,12 @@
+server:
+  port: 3063
+
+# 关闭嵌入式 Web 服务器，runner-file 不对外暴露 HTTP 接口
+spring:
+  profiles:
+    active: dev
+
+logging:
+  level:
+    root: WARN
+    com.hxh.apboa.file: INFO

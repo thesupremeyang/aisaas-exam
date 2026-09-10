@@ -1,0 +1,21 @@
+[Unit]
+Description=Apboa Runtime (AI 执行引擎 :3061)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apboa
+Group=apboa
+WorkingDirectory=/wwwroot
+EnvironmentFile=/wwwroot/apboa.env
+Environment=SPRING_PROFILES_ACTIVE=docker
+ExecStart=/usr/bin/java -Xms1g -Xmx2g -jar /wwwroot/jars/runner-runtime-1.0-SNAPSHOT.jar
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

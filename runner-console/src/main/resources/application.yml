@@ -1,0 +1,38 @@
+spring:
+  profiles:
+    active: dev
+  application:
+    name: Apboa
+  servlet:
+    multipart:
+      max-file-size: 30MB # 单个文件最大 30MB
+      max-request-size: 100MB # 请求总大小最大 100MB（假设最多3个30MB文件）
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+
+assessment:
+  runtime:
+    enabled: ${ASSESSMENT_RUNTIME_ENABLED:true}
+    endpoint: ${ASSESSMENT_RUNTIME_ENDPOINT:http://127.0.0.1:3061/runtime/assessment/initial}
+    agent-id: ${ASSESSMENT_RUNTIME_AGENT_ID:assessment-agent}
+    model: ${ASSESSMENT_RUNTIME_MODEL:}
+    prompt-version: ${ASSESSMENT_PROMPT_VERSION:assessment-v1}
+    system-prompt: ${ASSESSMENT_SYSTEM_PROMPT:请仅根据提交材料和评分量表输出结构化 JSON，不访问外部链接、不执行代码。}
+    timeout: ${ASSESSMENT_RUNTIME_TIMEOUT:30s}
+    bearer-token: ${ASSESSMENT_RUNTIME_TOKEN:}
+  # 火山方舟 Ark（OpenAI 兼容 /chat/completions）初评大模型
+  ark:
+    endpoint: ${ASSESSMENT_ARK_ENDPOINT:https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions}
+    api-key: ${ASSESSMENT_ARK_API_KEY:}
+    model: ${ASSESSMENT_ARK_MODEL:deepseek-v4-flash}
+    system-prompt: ${ASSESSMENT_ARK_SYSTEM_PROMPT:你是严格的考试评审专家。请依据下方评分量表与考生提交材料进行真实评分。评分铁律：1)必须先判断提交材料是否有效、实质性：若内容为空、长度过短、或仅为无意义的乱填字符（如重复的1/2/3/4/5、纯数字、与题目无关的占位文本、复制粘贴的无关内容等），一律认定为【无效作答】，各维度必须给最低分，最终总分需低于及格线（PASS等级线），并在conclusion中明确说明“内容无效/乱填，判定不及格”。2)只有材料真实、具体、切题时，才按质量给分，严禁平均主义或人情分。3)仅输出JSON，包含dimensionScores（各维度整数分）、totalScore（整数总分）、confidence、conclusion、evidence。4)必须严格依据给定评分量表维度与满分上限打分，totalScore必须等于各维度分之和。}
+    # 外部模型偶发排队时可能超过 30 秒；保留环境变量覆盖能力，默认给一次完整请求 90 秒。
+    timeout: ${ASSESSMENT_ARK_TIMEOUT:90s}
+
+# Comma-separated HTTPS origins permitted as SSO return targets. Relative portal routes remain allowed.
+exam:
+  sso:
+    return-url-allowlist: ${EXAM_SSO_RETURN_URL_ALLOWLIST:}

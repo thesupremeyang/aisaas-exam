@@ -1,0 +1,134 @@
+package com.hxh.apboa.engine.agui;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.hxh.apboa.common.entity.AgentDefinition;
+import com.hxh.apboa.common.util.JsonUtils;
+import com.hxh.apboa.common.vo.AccountVO;
+import io.agentscope.core.agui.model.RunAgentInput;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * 描述：智能体上下文
+ *
+ * @author huxuehao
+ **/
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class AgentContext {
+    private static final ThreadLocal<AgentContext> CONTEXT_HOLDER = new ThreadLocal<>();
+    private static final Map<String, AgentContext> THREAD_CONTEXTS = new ConcurrentHashMap<>();
+
+    private String threadId;
+    private String runId;
+    private boolean memoryActive;
+    private boolean planActive;
+    private List<String> fileIds;
+    private AccountVO userInfo;
+    private AgentDefinition agentDefinition;
+    private Map<String, Object> params;
+    private String tenantCode;
+    private Long tenantId;
+    private String accessToken;
+    private String platformBaseUrl;
+
+    public static void init(RunAgentInput input, String threadId) {
+        // 每次请求创建全新的上下文，避免复用旧上下文导致租户信息串扰
+        AgentContext agentContext = new AgentContext();
+
+        agentContext.setThreadId(threadId);
+
+        agentContext.setRunId(input.getRunId());
+
+        boolean memoryActive = input.getForwardedProp("memoryActive") != null
+                ? (Boolean) input.getForwardedProp("memoryActive")
+                : false;
+        agentContext.setMemoryActive(memoryActive);
+
+        agentContext.setPlanActive(
+                input.getForwardedProp("planActive") != null
+                        ? (Boolean) input.getForwardedProp("planActive")
+                        : false);
+
+        agentContext.setFileIds(toList(input.getForwardedProp("fileIds")));
+
+        AccountVO userInfo = input.getForwardedProp("userInfo") != null
+                ? JsonUtils.objectToBean(input.getForwardedProp("userInfo"), AccountVO.class)
+                : null;
+        agentContext.setUserInfo(userInfo);
+
+        agentContext.setParams(toMap(input.getForwardedProp("params")));
+
+        // 注入认证上下文，供智能体 shell 命令调用平台 API 使用
+        agentContext.setAccessToken(toStr(input.getForwardedProp("_accessToken")));
+        agentContext.setPlatformBaseUrl(toStr(input.getForwardedProp("_platformBaseUrl")));
+
+        init(agentContext);
+    }
+
+    public static void init(AgentContext agentContext) {
+        CONTEXT_HOLDER.set(agentContext);
+        if (agentContext.getThreadId() != null) {
+            THREAD_CONTEXTS.put(agentContext.getThreadId(), agentContext);
+        }
+    }
+
+    private static Map<String, Object> toMap(Object params) {
+        if (params == null) {
+            return new HashMap<>();
+        }
+
+        return JsonUtils.parse(JsonUtils.toJsonStr(params), new TypeReference<Map<String, Object>>() {});
+    }
+
+    private static List<String> toList(Object params) {
+        if (params == null) {
+            return new ArrayList<>();
+        }
+        return JsonUtils.parse(JsonUtils.toJsonStr(params), new TypeReference<List<String>>() {});
+    }
+
+    private static String toStr(Object params) {
+        if (params == null) {
+            return null;
+        }
+        return params instanceof String ? (String) params : params.toString();
+    }
+
+    public static AgentContext get() {
+        AgentContext agentContext = CONTEXT_HOLDER.get();
+        if (agentContext == null) {
+            throw new IllegalStateException(
+                    String.format("AgentContext not initialized for thread %s. " +
+                                    "Please ensure init() is called before get().",
+                            Thread.currentThread().getName())
+            );
+        }
+        return agentContext;
+    }
+
+    public static Optional<AgentContext> getIfExists() {
+        return Optional.ofNullable(CONTEXT_HOLDER.get());
+    }
+
+    public static Optional<AgentContext> getByThreadId(String threadId) {
+        return Optional.ofNullable(THREAD_CONTEXTS.get(threadId));
+    }
+
+    public static void set(AgentContext agentContext) {
+        CONTEXT_HOLDER.set(agentContext);
+    }
+
+    public static boolean exist() {
+        return CONTEXT_HOLDER.get() != null;
+    }
+
+    public static void clean() {
+        CONTEXT_HOLDER.remove();
+    }
+}

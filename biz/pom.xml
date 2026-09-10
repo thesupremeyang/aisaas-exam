@@ -1,0 +1,33 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.hxh.apboa.next</groupId>
+        <artifactId>apboa-next</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>biz</artifactId>
+    <packaging>pom</packaging>
+    <name>biz</name>
+
+    <modules>
+        <module>biz-a2a</module>
+        <module>biz-assessment</module>
+        <module>biz-account</module>
+        <module>biz-agent</module>
+        <module>biz-hook</module>
+        <module>biz-knowledge</module>
+        <module>biz-longterm</module>
+        <module>biz-mcp</module>
+        <module>biz-model</module>
+        <module>biz-params</module>
+        <module>biz-prompt</module>
+        <module>biz-resource</module>
+        <module>biz-sensitive</module>
+        <module>biz-sk</module>
+        <module>biz-skill</module>
+        <module>biz-studio</module>
+        <module>biz-tool</module>
+    </modules>
+</project>

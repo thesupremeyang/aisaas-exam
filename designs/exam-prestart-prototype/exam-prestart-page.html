@@ -1,0 +1,1159 @@
+<!--
+  Design context
+  - Existing product vocabulary: white portal topbar, blue/purple brand accents, light blue-gray canvas.
+  - This is a high-fidelity, single-screen candidate prototype for the pre-exam state.
+  - The countdown is driven by the local demo schedule; the production implementation should bind it to the admin schedule API.
+  - The primary interaction to review is configuring the model before the entry button unlocks.
+-->
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="国产大模型应用与AI编程智能体开发考试平台 - 考生开考前准备页原型" />
+    <title>开考前准备 · 考试平台原型</title>
+    <style>
+      :root {
+        --ink: #14213d;
+        --ink-soft: #44546f;
+        --muted: #7b8aa3;
+        --canvas: #f5f7fb;
+        --surface: #ffffff;
+        --line: #dce5f2;
+        --line-soft: #e8eef7;
+        --blue: #2d62f4;
+        --blue-deep: #1f49c8;
+        --blue-soft: #edf3ff;
+        --purple: #6656df;
+        --green: #1b9a72;
+        --shadow: 0 18px 42px rgba(38, 63, 111, 0.1);
+        --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body,
+      #root {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        min-width: 320px;
+        color: var(--ink);
+        background: var(--canvas);
+        font-family: var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+      }
+
+      .page {
+        min-height: 100vh;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 88% 7%, rgba(99, 91, 224, 0.08), transparent 27rem),
+          radial-gradient(circle at 3% 44%, rgba(45, 98, 244, 0.06), transparent 24rem),
+          var(--canvas);
+      }
+
+      .portal-topbar {
+        position: relative;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        height: 72px;
+        padding: 0 38px;
+        background: rgba(255, 255, 255, 0.94);
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 2px 16px rgba(36, 61, 112, 0.04);
+        backdrop-filter: blur(16px);
+      }
+
+      .brand {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 10px;
+        color: var(--ink);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        white-space: nowrap;
+      }
+
+      .brand img {
+        width: 34px;
+        height: 34px;
+        object-fit: contain;
+        border-radius: 10px;
+        box-shadow: 0 5px 14px rgba(45, 98, 244, 0.18);
+      }
+
+      .nav {
+        display: flex;
+        flex: 1;
+        gap: 8px;
+      }
+
+      .nav-item {
+        padding: 9px 14px;
+        color: #64738c;
+        background: transparent;
+        border-radius: 9px;
+        cursor: default;
+        font-size: 14px;
+      }
+
+      .nav-item.active {
+        color: var(--blue);
+        background: var(--blue-soft);
+        font-weight: 650;
+      }
+
+      .nav-item.muted {
+        color: #a9b4c5;
+      }
+
+      .topbar-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        color: #52627b;
+        background: #f4f7fc;
+        border: 1px solid var(--line-soft);
+        border-radius: 999px;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #f4ae3c;
+        box-shadow: 0 0 0 4px rgba(244, 174, 60, 0.12);
+      }
+
+      .user {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding-left: 4px;
+        white-space: nowrap;
+      }
+
+      .avatar {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        color: #ffffff;
+        background: #5b5bd6;
+        border-radius: 50%;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .user-copy {
+        display: grid;
+        gap: 2px;
+      }
+
+      .user-name {
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .user-role {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .main {
+        width: min(1180px, calc(100% - 48px));
+        margin: 0 auto;
+        padding: 38px 0 58px;
+      }
+
+      .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 22px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .breadcrumb strong {
+        color: #5b6c86;
+        font-weight: 600;
+      }
+
+      .breadcrumb-separator {
+        color: #b4c0d1;
+      }
+
+      .intro {
+        display: block;
+        margin-bottom: 26px;
+      }
+
+      .intro-copy {
+        max-width: 680px;
+      }
+
+      .eyebrow {
+        margin: 0 0 9px;
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 11px;
+        color: var(--ink);
+        font-size: clamp(28px, 3.4vw, 42px);
+        line-height: 1.18;
+        letter-spacing: -0.035em;
+      }
+
+      .intro-description {
+        max-width: 590px;
+        margin-bottom: 0;
+        color: var(--ink-soft);
+        font-size: 15px;
+        line-height: 1.75;
+      }
+
+      .primary-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.28fr) minmax(335px, 0.72fr);
+        gap: 20px;
+        align-items: stretch;
+      }
+
+      .countdown-card {
+        position: relative;
+        display: flex;
+        min-height: 394px;
+        overflow: hidden;
+        flex-direction: column;
+        padding: 33px 35px 28px;
+        color: #ffffff;
+        background: #172b52;
+        border-radius: 22px;
+        box-shadow: 0 22px 44px rgba(22, 45, 89, 0.2);
+      }
+
+      .countdown-card::before,
+      .countdown-card::after {
+        position: absolute;
+        content: "";
+        pointer-events: none;
+        border: 1px solid rgba(160, 193, 255, 0.12);
+        border-radius: 50%;
+      }
+
+      .countdown-card::before {
+        width: 440px;
+        height: 440px;
+        right: -165px;
+        bottom: -268px;
+      }
+
+      .countdown-card::after {
+        width: 270px;
+        height: 270px;
+        right: -86px;
+        bottom: -165px;
+        border-color: rgba(151, 190, 255, 0.09);
+      }
+
+      .card-kicker {
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 31px;
+        color: #b8c9ee;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .card-kicker-line {
+        width: 22px;
+        height: 1px;
+        background: #83a8ff;
+      }
+
+      .countdown-heading {
+        position: relative;
+        z-index: 1;
+        margin-bottom: 18px;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: 500;
+      }
+
+      .countdown-row {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .time-block {
+        padding: 15px 12px 13px;
+        background: rgba(255, 255, 255, 0.095);
+        border: 1px solid rgba(190, 211, 255, 0.13);
+        border-radius: 13px;
+        text-align: center;
+      }
+
+      .time-value {
+        display: block;
+        color: #ffffff;
+        font-size: clamp(31px, 4.8vw, 52px);
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+        letter-spacing: -0.04em;
+        line-height: 1;
+      }
+
+      .time-label {
+        display: block;
+        margin-top: 8px;
+        color: #9fb3dc;
+        font-size: 11px;
+      }
+
+      .start-info {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-top: auto;
+        padding-top: 19px;
+        border-top: 1px solid rgba(181, 205, 255, 0.15);
+      }
+
+      .start-info-label {
+        display: block;
+        margin-bottom: 5px;
+        color: #98acd3;
+        font-size: 11px;
+      }
+
+      .start-info-value {
+        color: #ffffff;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .entry-button {
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-width: 156px;
+        min-height: 46px;
+        padding: 0 16px;
+        color: #eef4ff;
+        background: #5274bb;
+        border: 1px solid rgba(191, 215, 255, 0.38);
+        border-radius: 11px;
+        box-shadow: 0 8px 18px rgba(10, 26, 61, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        cursor: not-allowed;
+        font-size: 13px;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+      }
+
+      .entry-button.ready {
+        color: #ffffff;
+        background: var(--blue);
+        border-color: var(--blue);
+        box-shadow: 0 10px 20px rgba(45, 98, 244, 0.24);
+        cursor: pointer;
+      }
+
+      .lock-mark {
+        position: relative;
+        display: inline-block;
+        width: 12px;
+        height: 10px;
+        border: 1.5px solid currentColor;
+        border-radius: 2px;
+      }
+
+      .lock-mark::before {
+        position: absolute;
+        top: -8px;
+        left: 2px;
+        width: 5px;
+        height: 7px;
+        content: "";
+        border: 1.5px solid currentColor;
+        border-bottom: 0;
+        border-radius: 5px 5px 0 0;
+      }
+
+      .countdown-footnote {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 10px;
+        color: #91a6d0;
+        font-size: 11px;
+      }
+
+      .check-mark {
+        display: grid;
+        width: 16px;
+        height: 16px;
+        place-items: center;
+        color: #a9c5ff;
+        border: 1px solid rgba(169, 197, 255, 0.5);
+        border-radius: 50%;
+        font-size: 10px;
+      }
+
+      .config-card {
+        display: flex;
+        min-height: 394px;
+        flex-direction: column;
+        padding: 28px 28px 25px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+      }
+
+      .config-card-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .config-icon {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        color: var(--blue);
+        background: var(--blue-soft);
+        border: 1px solid #dbe7ff;
+        border-radius: 13px;
+        font-size: 18px;
+        font-weight: 800;
+      }
+
+      .config-status {
+        padding: 6px 9px;
+        color: #bb7b13;
+        background: #fff8e8;
+        border: 1px solid #f8e7bd;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .config-status.saved {
+        color: #1b8566;
+        background: #edf9f4;
+        border-color: #d0eee3;
+      }
+
+      .config-card h2 {
+        margin: 24px 0 8px;
+        color: var(--ink);
+        font-size: 21px;
+        letter-spacing: -0.02em;
+      }
+
+      .config-description {
+        margin-bottom: 22px;
+        color: var(--ink-soft);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .config-summary {
+        display: grid;
+        gap: 0;
+        margin-bottom: 20px;
+        padding: 0 15px;
+        background: #f8faff;
+        border: 1px solid #e4ebf9;
+        border-radius: 13px;
+      }
+
+      .summary-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 11px 0;
+        border-bottom: 1px solid #e8eef8;
+        font-size: 12px;
+      }
+
+      .summary-row:last-child {
+        border-bottom: 0;
+      }
+
+      .summary-label {
+        color: var(--muted);
+      }
+
+      .summary-value {
+        max-width: 160px;
+        overflow: hidden;
+        color: var(--ink);
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .summary-value.pending {
+        color: #a7b2c3;
+        font-weight: 500;
+      }
+
+      .config-button {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 46px;
+        margin-top: auto;
+        color: #ffffff;
+        background: var(--blue);
+        border-radius: 11px;
+        box-shadow: 0 9px 18px rgba(45, 98, 244, 0.2);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+      }
+
+      .config-button:hover {
+        background: var(--blue-deep);
+        box-shadow: 0 12px 22px rgba(45, 98, 244, 0.24);
+        transform: translateY(-1px);
+      }
+
+      .arrow {
+        font-size: 17px;
+        line-height: 1;
+      }
+
+      .config-footnote {
+        margin: 12px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.5;
+        text-align: center;
+      }
+
+      .sync-success-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgba(27, 154, 114, 0.11);
+      }
+
+      .toast {
+        position: fixed;
+        z-index: 20;
+        right: 24px;
+        bottom: 24px;
+        padding: 12px 16px;
+        color: #ffffff;
+        background: #172b52;
+        border-radius: 11px;
+        box-shadow: 0 15px 30px rgba(22, 45, 89, 0.2);
+        font-size: 12px;
+        animation: toast-in 0.2s ease-out;
+      }
+
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .drawer-backdrop {
+        position: fixed;
+        z-index: 10;
+        inset: 0;
+        display: flex;
+        justify-content: flex-end;
+        background: rgba(12, 25, 53, 0.42);
+        backdrop-filter: blur(3px);
+      }
+
+      .drawer {
+        display: flex;
+        width: min(480px, 100%);
+        height: 100%;
+        flex-direction: column;
+        padding: 30px 32px;
+        overflow-y: auto;
+        background: #ffffff;
+        box-shadow: -18px 0 50px rgba(16, 35, 77, 0.19);
+        animation: drawer-in 0.22s ease-out;
+      }
+
+      @keyframes drawer-in {
+        from {
+          transform: translateX(22px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      .drawer-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding-bottom: 23px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .drawer-header h2 {
+        margin: 0 0 7px;
+        color: var(--ink);
+        font-size: 22px;
+        letter-spacing: -0.02em;
+      }
+
+      .drawer-header p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .close-button {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        color: #6f7f98;
+        background: #f5f7fb;
+        border: 1px solid var(--line-soft);
+        border-radius: 9px;
+        cursor: pointer;
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      .drawer-section {
+        padding-top: 24px;
+      }
+
+      .drawer-label {
+        display: block;
+        margin-bottom: 10px;
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .provider-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .provider-option {
+        display: grid;
+        gap: 4px;
+        padding: 13px;
+        color: var(--ink-soft);
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        cursor: pointer;
+        text-align: left;
+        transition: border-color 0.18s ease, background 0.18s ease;
+      }
+
+      .provider-option:hover,
+      .provider-option.selected {
+        color: var(--blue-deep);
+        background: var(--blue-soft);
+        border-color: #a9c3ff;
+      }
+
+      .provider-name {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .provider-description {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .field-label {
+        color: var(--ink-soft);
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .field-control {
+        width: 100%;
+        min-height: 43px;
+        padding: 0 12px;
+        color: var(--ink);
+        background: #fbfcff;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        outline: none;
+        font-size: 12px;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+      }
+
+      .field-control:focus {
+        border-color: #8eafff;
+        box-shadow: 0 0 0 3px rgba(45, 98, 244, 0.1);
+      }
+
+      .field-hint {
+        margin: 0;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.5;
+      }
+
+      .connection-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 19px;
+        padding: 12px;
+        background: #f8faff;
+        border: 1px solid #e6edf8;
+        border-radius: 10px;
+      }
+
+      .connection-state {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .connection-state.ok {
+        color: var(--green);
+      }
+
+      .connection-button {
+        min-height: 32px;
+        padding: 0 11px;
+        color: var(--blue);
+        background: #ffffff;
+        border: 1px solid #cddcff;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .connection-button:disabled {
+        color: #9aa9bf;
+        cursor: wait;
+      }
+
+      .drawer-actions {
+        display: grid;
+        gap: 9px;
+        margin-top: auto;
+        padding-top: 26px;
+      }
+
+      .save-button {
+        min-height: 46px;
+        color: #ffffff;
+        background: var(--blue);
+        border-radius: 10px;
+        box-shadow: 0 9px 18px rgba(45, 98, 244, 0.2);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .drawer-note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.6;
+        text-align: center;
+      }
+
+      @media (max-width: 880px) {
+        .portal-topbar {
+          gap: 15px;
+          padding: 0 20px;
+        }
+
+        .nav-item {
+          padding: 8px 10px;
+        }
+
+        .topbar-status {
+          display: none;
+        }
+
+        .primary-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .countdown-card {
+          display: block;
+          padding-bottom: 31px;
+        }
+
+        .start-info {
+          margin-top: 27px;
+        }
+
+        .countdown-footnote {
+          margin-top: 16px;
+        }
+
+        .entry-button {
+          min-height: 48px;
+        }
+
+        .config-card {
+          min-height: auto;
+        }
+
+      }
+
+      @media (max-width: 620px) {
+        .portal-topbar {
+          height: 64px;
+        }
+
+        .brand {
+          font-size: 13px;
+        }
+
+        .brand img {
+          width: 30px;
+          height: 30px;
+        }
+
+        .nav {
+          display: none;
+        }
+
+        .user-copy {
+          display: none;
+        }
+
+        .main {
+          width: min(100% - 28px, 560px);
+          padding-top: 26px;
+        }
+
+        .countdown-card {
+          min-height: auto;
+          padding: 28px 20px 24px;
+        }
+
+        .countdown-row {
+          gap: 6px;
+        }
+
+        .time-block {
+          padding: 13px 5px 11px;
+        }
+
+        .time-value {
+          font-size: 30px;
+        }
+
+        .start-info {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .entry-button {
+          width: 100%;
+        }
+
+        .config-card {
+          padding: 22px 19px;
+          border-radius: 17px;
+        }
+
+        .drawer {
+          padding: 24px 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+    <script type="text/babel">
+      const { useEffect, useMemo, useState } = React;
+
+      function pad(value) {
+        return String(value).padStart(2, '0');
+      }
+
+      function getNextExamStart() {
+        const now = new Date();
+        const target = new Date(now);
+        target.setHours(9, 0, 0, 0);
+        if (target.getTime() <= now.getTime()) {
+          target.setDate(target.getDate() + 1);
+        }
+        return target;
+      }
+
+      function formatDateTime(date) {
+        return `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      }
+
+      function getCountdownParts(milliseconds) {
+        const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+        return {
+          days: Math.floor(totalSeconds / 86400),
+          hours: Math.floor((totalSeconds % 86400) / 3600),
+          minutes: Math.floor((totalSeconds % 3600) / 60),
+          seconds: totalSeconds % 60,
+        };
+      }
+
+      function App() {
+        const [currentTime, setCurrentTime] = useState(() => new Date());
+        const [examStart] = useState(() => getNextExamStart());
+        const [drawerOpen, setDrawerOpen] = useState(false);
+        const [provider, setProvider] = useState('bailian');
+        const [model, setModel] = useState('qwen-max');
+        const [apiKey, setApiKey] = useState('');
+        const [saved, setSaved] = useState(false);
+        const [testing, setTesting] = useState(false);
+        const [connected, setConnected] = useState(false);
+        const [notice, setNotice] = useState('');
+
+        useEffect(() => {
+          const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
+          return () => window.clearInterval(timer);
+        }, []);
+
+        useEffect(() => {
+          if (!notice) return undefined;
+          const timer = window.setTimeout(() => setNotice(''), 2600);
+          return () => window.clearTimeout(timer);
+        }, [notice]);
+
+        useEffect(() => {
+          if (!drawerOpen) return undefined;
+          const onKeyDown = (event) => {
+            if (event.key === 'Escape') setDrawerOpen(false);
+          };
+          document.addEventListener('keydown', onKeyDown);
+          return () => document.removeEventListener('keydown', onKeyDown);
+        }, [drawerOpen]);
+
+        const remaining = examStart.getTime() - currentTime.getTime();
+        const hasStarted = remaining <= 0;
+        const countdown = useMemo(() => getCountdownParts(remaining), [remaining]);
+        const startLabel = formatDateTime(examStart);
+        const providerLabel = provider === 'bailian' ? '阿里云百炼' : 'OpenAI 兼容服务';
+        const modelLabel = model === 'qwen-max' ? '通义千问 Max' : 'DeepSeek V3';
+
+        function testConnection() {
+          setTesting(true);
+          window.setTimeout(() => {
+            setTesting(false);
+            setConnected(true);
+            setNotice('连接测试成功，可以保存配置');
+          }, 700);
+        }
+
+        function saveConfiguration() {
+          setSaved(true);
+          setConnected(true);
+          setDrawerOpen(false);
+          setNotice('大模型配置已保存，开考时会自动使用');
+        }
+
+        function enterExam() {
+          if (!hasStarted) return;
+          setNotice('进入考试流程（原型演示）');
+        }
+
+        return (
+          <div className="page" data-screen-label="考生开考前准备页">
+            <header className="portal-topbar">
+              <div className="brand">
+                <img src="./logo.png" alt="星图 AI Logo" />
+                <span>星图AI智能考试平台</span>
+              </div>
+              <nav className="nav" aria-label="考试导航">
+                <span className="nav-item active">考试门户</span>
+                <span className="nav-item muted">我的作品</span>
+                <span className="nav-item muted">AI 智评</span>
+              </nav>
+              <div className="topbar-status"><span className="status-dot"></span>考前准备</div>
+              <div className="user">
+                <div className="avatar">模</div>
+                <div className="user-copy">
+                  <span className="user-name">模拟考生</span>
+                  <span className="user-role">考生账号 · 20260002</span>
+                </div>
+              </div>
+            </header>
+
+            <main className="main">
+              <div className="breadcrumb"><span>考试门户</span><span className="breadcrumb-separator">/</span><strong>开考前准备</strong></div>
+
+              <section className="intro">
+                <div className="intro-copy">
+                  <p className="eyebrow">2026 智能体开发专题班</p>
+                  <h1>先把算力准备好，<br />考试准时开始。</h1>
+                  <p className="intro-description">当前处于考前准备阶段。你可以先完成大模型配置，开考后“进入考试”按钮会自动解锁。</p>
+                </div>
+              </section>
+
+              <section className="primary-grid">
+                <article className="countdown-card">
+                  <div className="card-kicker"><span className="card-kicker-line"></span>EXAM STARTS SOON</div>
+                  <div className="countdown-heading">距离开考还有</div>
+                  <div className="countdown-row" aria-label="考试倒计时">
+                    <div className="time-block"><span className="time-value">{pad(countdown.days)}</span><span className="time-label">天</span></div>
+                    <div className="time-block"><span className="time-value">{pad(countdown.hours)}</span><span className="time-label">时</span></div>
+                    <div className="time-block"><span className="time-value">{pad(countdown.minutes)}</span><span className="time-label">分</span></div>
+                    <div className="time-block"><span className="time-value">{pad(countdown.seconds)}</span><span className="time-label">秒</span></div>
+                  </div>
+                  <div className="start-info">
+                    <div>
+                      <span className="start-info-label">开考时间</span>
+                      <strong className="start-info-value">{startLabel}</strong>
+                    </div>
+                    <button className={`entry-button${hasStarted ? ' ready' : ''}`} type="button" disabled={!hasStarted} onClick={enterExam}>
+                      {!hasStarted && <span className="lock-mark" aria-hidden="true"></span>}
+                      进入考试
+                    </button>
+                  </div>
+                  <div className="countdown-footnote"><span className="check-mark">✓</span>进入考试将在倒计时结束后自动开放</div>
+                </article>
+
+                <article className="config-card">
+                  <div className="config-card-header">
+                    <div className="config-icon">AI</div>
+                    <span className={`config-status${saved ? ' saved' : ''}`}>{saved ? '已配置' : '待配置'}</span>
+                  </div>
+                  <h2>大模型配置</h2>
+                  <p className="config-description">提前绑定你的大模型算力，开考后创建智能体时会自动使用。</p>
+                  <div className="config-summary">
+                    <div className="summary-row"><span className="summary-label">服务商</span><span className={`summary-value${saved ? '' : ' pending'}`}>{saved ? providerLabel : '尚未选择'}</span></div>
+                    <div className="summary-row"><span className="summary-label">模型</span><span className={`summary-value${saved ? '' : ' pending'}`}>{saved ? modelLabel : '尚未选择'}</span></div>
+                    <div className="summary-row"><span className="summary-label">连接状态</span><span className={`summary-value${saved ? '' : ' pending'}`}>{saved ? '已验证' : '等待配置'}</span></div>
+                  </div>
+                  <button className="config-button" type="button" onClick={() => setDrawerOpen(true)}><span>{saved ? '修改大模型配置' : '配置大模型'}</span><span className="arrow">→</span></button>
+                  <p className="config-footnote">考前可修改 · 开考后配置将锁定</p>
+                </article>
+              </section>
+
+            </main>
+
+            {drawerOpen && (
+              <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawerOpen(false); }}>
+                <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+                  <div className="drawer-header">
+                    <div><h2 id="drawer-title">大模型配置</h2><p>为本场考试准备你的智能体算力</p></div>
+                    <button className="close-button" type="button" aria-label="关闭配置" onClick={() => setDrawerOpen(false)}>×</button>
+                  </div>
+
+                  <div className="drawer-section">
+                    <span className="drawer-label">选择服务商</span>
+                    <div className="provider-grid">
+                      <button className={`provider-option${provider === 'bailian' ? ' selected' : ''}`} type="button" onClick={() => setProvider('bailian')}><span className="provider-name">阿里云百炼</span><span className="provider-description">国内模型服务</span></button>
+                      <button className={`provider-option${provider === 'compatible' ? ' selected' : ''}`} type="button" onClick={() => setProvider('compatible')}><span className="provider-name">OpenAI 兼容</span><span className="provider-description">自定义 API 地址</span></button>
+                    </div>
+                  </div>
+
+                  <div className="field"><label className="field-label" htmlFor="model-select">模型</label><select className="field-control" id="model-select" value={model} onChange={(event) => setModel(event.target.value)}><option value="qwen-max">通义千问 Max</option><option value="deepseek-v3">DeepSeek V3</option></select></div>
+                  <div className="field"><label className="field-label" htmlFor="api-key">API Key</label><input className="field-control" id="api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="请输入用于考试的 API Key" /><p className="field-hint">密钥只用于本场考试的智能体调用，保存后以加密方式存储。</p></div>
+
+                  <div className="connection-row"><span className={`connection-state${connected ? ' ok' : ''}`}><span className="sync-success-dot"></span>{connected ? '连接测试成功' : '尚未测试连接'}</span><button className="connection-button" type="button" disabled={testing} onClick={testConnection}>{testing ? '测试中…' : '测试连接'}</button></div>
+
+                  <div className="drawer-actions"><button className="save-button" type="button" onClick={saveConfiguration}>保存配置</button><p className="drawer-note">保存后可在考前随时修改；开考后将以当前配置进入考试。</p></div>
+                </aside>
+              </div>
+            )}
+
+            {notice && <div className="toast" role="status">{notice}</div>}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>

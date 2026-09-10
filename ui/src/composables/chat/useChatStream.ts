@@ -1,0 +1,392 @@
+import { ref } from 'vue'
+import { message } from 'ant-design-vue'
+import { useAgentClient } from '@/composables/useAgentClient'
+import { usePlanTracking } from '@/composables/chat/usePlanTracking'
+import { buildToolCallsContent } from '@/utils/chat/format'
+import type {AccountVO, ChatMessageVO, RawEvent} from '@/types'
+import { useAccountStore } from '@/stores'
+import { stopRun } from '@/api/agui'
+
+let lastIdBig = BigInt(Date.now()) << 12n;
+function nextIdBig() {
+  return String(lastIdBig++);
+}
+
+export function useChatStream(
+  agentId: import('vue').Ref<string>,
+  agentDetail: import('vue').Ref<any>,
+  currentSessionId: import('vue').Ref<string | null>,
+  fileIds?: import('vue').Ref<string[]>,
+  memoryActive?: import('vue').Ref<boolean>,
+  planActive?: import('vue').Ref<boolean>,
+  toolProcessActive?: import('vue').Ref<boolean>,
+  onMessageSaved?: (chatMsg: ChatMessageVO) => void,
+  userInfoOverride?: import('vue').Ref<AccountVO | null | undefined>) {
+
+  const accountStore = useAccountStore()
+
+  // 计划追踪
+  const {
+    currentPlan,
+    hasPlan,
+    onToolStart: onPlanToolStart,
+    onToolArgs: onPlanToolArgs,
+    onToolResult: onPlanToolResult,
+    resetPlan
+  } = usePlanTracking()
+
+  const getForwardedProps = () => ({
+    agentId: agentId.value,
+    agentCode: agentDetail.value?.agentCode,
+    fileIds: fileIds?.value ?? [],
+    memoryActive: memoryActive?.value ?? false,
+    planActive: planActive?.value ?? false,
+    toolProcessActive: toolProcessActive?.value ?? false,
+    userInfo: userInfoOverride?.value ?? accountStore.userInfo
+  })
+
+  // 流式内容
+  const agentHasResult = ref(true)
+  const streamingMessageId = ref<string | null>(null)
+  const streamingRole = ref<'user' | 'assistant' | 'system' | 'tool' | 'thinking'>('system')
+  const streamingContent = ref('')
+
+  // 工具调用进度
+  const toolCallsInProgress = ref<
+    Array<{ id: string; name: string; args: string; result?: string; startTime: number; elapsed?: number, needConfirm?: boolean }>
+  >([])
+
+  // 使用原有的 useAgentClient
+  const { messages, isRunning, isReplaying, run, abort, disconnect, reconnect, addUserMessage, client } = useAgentClient({
+    handlers: {
+      onRunStarted: () => {
+        toolCallsInProgress.value = []
+        streamingContent.value = ''
+        streamingMessageId.value = null
+      },
+      onTextMessageStart: (e) => {
+        streamingRole.value = 'assistant'
+        streamingContent.value = ''
+        streamingMessageId.value = e.messageId
+      },
+      onTextMessageContent: (_e, currentText) => {
+        agentHasResult.value = true
+        streamingContent.value = currentText
+      },
+      onTextMessageEnd: (_e, finalText) => {
+        const sid = currentSessionId.value
+        if (sid && finalText) {
+          // 纯文本保存，不再与推理打包，通过队列保证写入顺序
+          onMessageSaved?.({
+            id: streamingMessageId.value,
+            sessionId: sid,
+            role: streamingRole.value,  // 这里必须使用 streamingRole.value，不能写死 assistant
+            content: finalText,
+            parentId: '',
+            path: '',
+            depth: 0,
+            createdAt: ''
+          } as ChatMessageVO)
+        }
+        // 无论是否回放，都清除流式状态
+        streamingMessageId.value = null
+        streamingContent.value = ''
+        streamingRole.value = 'system'
+      },
+      onReasoningMessageStart: (e) => {
+        streamingRole.value = 'thinking'
+        streamingContent.value = ''
+        streamingMessageId.value = e.messageId
+      },
+      onReasoningMessageContent: (_e, currentText) => {
+        streamingContent.value = currentText
+      },
+      onReasoningMessageEnd: () => {
+        const sid = currentSessionId.value
+        if (sid && streamingContent.value) {
+          // 推理结束时立即保存为独立消息，通过队列保证写入顺序
+          onMessageSaved?.({
+            id: streamingMessageId.value,
+            sessionId: sid,
+            role: streamingRole.value, // 这里必须使用 streamingRole.value，不能写死 thinking
+            content: streamingContent.value,
+            parentId: '',
+            path: '',
+            depth: 0,
+            createdAt: ''
+          } as ChatMessageVO)
+          // 保存完成后清除推理状态，利用 displayMessages 去重避免闪烁
+          streamingMessageId.value = null
+          streamingContent.value = ''
+          streamingRole.value = 'system'
+        }
+      },
+      onToolCallStart: (e) => {
+        // 计划追踪：记录工具调用名称
+        onPlanToolStart(e.toolCallId, e.toolCallName)
+
+        agentHasResult.value = true
+        toolCallsInProgress.value = [
+          ...toolCallsInProgress.value,
+          { id: e.toolCallId, name: e.toolCallName, args: '', startTime: Date.now() }
+        ]
+
+        const sid = currentSessionId.value
+        if (sid && streamingContent.value) {
+          // 推理结束时保存为独立消息，通过队列保证写入顺序
+          onMessageSaved?.({
+            id: streamingMessageId.value,
+            sessionId: sid,
+            role: streamingRole.value,
+            content: streamingContent.value,
+            parentId: '',
+            path: '',
+            depth: 0,
+            createdAt: ''
+          } as ChatMessageVO)
+          // 保存完成后清除推理状态，利用 displayMessages 去重避免闪烁
+          streamingMessageId.value = null
+          streamingContent.value = ''
+          streamingRole.value = 'system'
+        }
+      },
+      onToolCallArgs: (_e, partialArgs) => {
+        // 计划追踪：累积工具参数
+        onPlanToolArgs(_e.toolCallId, partialArgs)
+
+        const arr = [...toolCallsInProgress.value]
+        const last = arr[arr.length - 1]
+        if (last) last.args = partialArgs
+        toolCallsInProgress.value = arr
+      },
+      onToolCallResult: (e) => {
+        // 计划追踪：处理工具结果
+        onPlanToolResult(e.toolCallId)
+
+        try {
+          // 判断是否开启了显示工具调用
+          if (!(toolProcessActive?.value ?? true)) {
+            return
+          }
+          // 更新工具调用结果和耗时
+          toolCallsInProgress.value = toolCallsInProgress.value.map((t) =>
+            t.id === e.toolCallId ? { ...t, result: e.content, elapsed: Date.now() - t.startTime } : t
+          )
+
+          // // 保存工具调用消息，通过队列保证写入顺序
+          const sid = currentSessionId.value
+          if (sid) {
+            const contentToSave = buildToolCallsContent(toolCallsInProgress.value)
+            if (contentToSave) {
+              onMessageSaved?.({
+                id: nextIdBig(),
+                sessionId: sid,
+                role: 'tool',
+                content: contentToSave,
+                parentId: '',
+                path: '',
+                depth: 0,
+                createdAt: ''
+              } as ChatMessageVO)
+            }
+          }
+        } finally {
+          // 清空进行中的工具调用（可根据需要保留，此处清空）
+          toolCallsInProgress.value = []
+        }
+      },
+      onRunFinished: (_e) => {
+        agentHasResult.value = true
+        if (toolCallsInProgress.value.length > 0) {
+          toolCallsInProgress.value.forEach(item => item.needConfirm = true)
+        }
+      },
+      onRaw: (event) => {
+        const e = event as RawEvent
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawEvent: any = e.rawEvent
+        if(rawEvent.error) {
+          streamingMessageId.value = new Date().getTime() + '' + Math.floor(Math.random() * 90000) + 10000
+          streamingContent.value = rawEvent.error
+          const sid = currentSessionId.value
+          if (sid) {
+            onMessageSaved?.({
+              id: streamingMessageId.value,
+              sessionId: sid,
+              role: 'error',
+              content: rawEvent.error,
+              parentId: '',
+              path: '',
+              depth: 0,
+              createdAt: ''
+            } as ChatMessageVO)
+            // 保存完成后清除推理状态，利用 displayMessages 去重避免闪烁
+            streamingMessageId.value = null
+            streamingContent.value = ''
+            streamingRole.value = 'system'
+          }
+        }
+     }
+    }
+  })
+
+  // 发送消息
+  const sendToolContent = async (value: any) => {
+    const {id, name, args, result, content } = value
+    client.messages = [{
+      id,
+      role: 'tool',
+      content: JSON.stringify(content),
+      toolCallId: content[0].id,
+    }]
+
+    // 判断是否开启了显示工具调用
+    if ((toolProcessActive?.value ?? true)) {
+      const sid = currentSessionId.value as string
+      // 保存历史，通过队列保证写入顺序
+      const contentToSave = buildToolCallsContent([{ id, name, args, result, elapsed: 0 }])
+      if (contentToSave) {
+        onMessageSaved?.({
+          id: nextIdBig(),
+          sessionId: sid,
+          role: 'tool',
+          content: contentToSave,
+          parentId: '',
+          path: '',
+          depth: 0,
+          createdAt: ''
+        } as ChatMessageVO)
+      }
+    }
+
+    await run({
+      threadId: currentSessionId.value || undefined,
+      runId: `run_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      forwardedProps: getForwardedProps()
+    })
+  }
+
+  // 中止运行
+  const abortRun = async  () => {
+    // 先调用后端 stop API 强制中断
+    const sid = currentSessionId.value
+    if (sid) {
+      try { await stopRun(sid) } catch { /* 忽略 stop API 错误 */ }
+    }
+    await abort()
+    agentHasResult.value = true
+
+    // 重置计划状态
+    resetPlan()
+
+    if (sid) {
+      // 保存工具调用消息，通过队列保证写入顺序
+      if (toolCallsInProgress.value.length > 0) {
+        const contentToSave = buildToolCallsContent(toolCallsInProgress.value)
+        if (contentToSave) {
+          onMessageSaved?.({
+            id: nextIdBig(),
+            sessionId: sid,
+            role: 'tool',
+            content: contentToSave,
+            parentId: '',
+            path: '',
+            depth: 0,
+            createdAt: ''
+          } as ChatMessageVO)
+        }
+      }
+      // 保存AI回复消息
+      else {
+        if (streamingContent.value) {
+          onMessageSaved?.({
+            id: streamingMessageId.value,
+            sessionId: sid,
+            role: streamingRole.value,
+            content: streamingContent.value,
+            parentId: '',
+            path: '',
+            depth: 0,
+            createdAt: ''
+          } as ChatMessageVO)
+        }
+      }
+
+      toolCallsInProgress.value = []
+      streamingMessageId.value = null
+      streamingContent.value = ''
+      streamingRole.value = 'system'
+      isRunning.value = false
+
+    }
+
+  }
+
+  // 发送消息（可选传入 fileIds 覆盖，用于发送时已清空输入框的场景）
+  const sendMessage = async (
+    inputText: string,
+    messagesList: ChatMessageVO[],
+    overrideFileIds?: string[]
+  ) => {
+    const effectiveFileIds = overrideFileIds ?? fileIds?.value ?? []
+    if (!agentId.value) return
+    if (!inputText.trim() && !effectiveFileIds.length) return
+    if (isRunning.value) return
+    if (!agentDetail.value?.agentCode) {
+      message.error('智能体信息未加载完成，请稍后再试')
+      return
+    }
+
+    // 构建 client 需要的消息格式
+    client.messages = messagesList
+      .filter((m) => !['system', 'tool'].includes(m.role))
+      .map((m) => ({
+        id: String(m.id),
+        role: m.role as any,
+        content: (m.content || '') as string
+      }))
+
+    const forwardedProps = getForwardedProps()
+    if (overrideFileIds !== undefined) {
+      forwardedProps.fileIds = overrideFileIds
+    }
+
+    agentHasResult.value = false
+    await run({
+      threadId: currentSessionId.value || undefined,
+      runId: `run_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      forwardedProps
+    })
+  }
+
+  /**
+   * 重置所有流式状态，用于会话切换时清理旧 session 残留。
+   */
+  function resetStreamingState() {
+    streamingMessageId.value = null
+    streamingContent.value = ''
+    streamingRole.value = 'system'
+    toolCallsInProgress.value = []
+    agentHasResult.value = true
+    currentPlan.value = null
+  }
+
+  return {
+    agentHasResult,
+    streamingContent,
+    streamingMessageId,
+    streamingRole,
+    toolCallsInProgress,
+    isRunning,
+    isReplaying,
+    currentPlan,
+    hasPlan,
+    abortRun,
+    sendMessage,
+    sendToolContent,
+    reconnect,
+    disconnect,
+    resetStreamingState,
+    client, // 如果需要暴露
+  }
+}

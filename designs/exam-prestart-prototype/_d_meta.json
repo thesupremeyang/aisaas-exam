@@ -1,0 +1,18 @@
+{
+  "type": "design",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "考生开考前准备页": {
+      "versions": [
+        {
+          "path": "exam-prestart-page.html",
+          "createdAt": "2026-08-28T12:34:31.686Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-08-28T12:34:31.692Z",
+  "updatedAt": "2026-08-28T12:44:36.502Z"
+}
