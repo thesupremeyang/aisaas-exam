@@ -15,6 +15,7 @@ import com.hxh.apboa.common.entity.ModelConfig;
 import com.hxh.apboa.common.entity.ModelProvider;
 import com.hxh.apboa.common.enums.AuthType;
 import com.hxh.apboa.common.enums.ModelProviderType;
+import com.hxh.apboa.common.util.ModelEndpointValidator;
 import com.hxh.apboa.common.vo.ExamCandidateModelConfigVO;
 import com.hxh.apboa.model.mapper.ModelConfigMapper;
 import com.hxh.apboa.model.mapper.ModelProviderMapper;
@@ -113,7 +114,18 @@ public class ExamCandidateModelConfigServiceImpl implements ExamCandidateModelCo
         ModelConfig config = enrollment.getModelConfigId() == null ? null : configMapper.selectById(enrollment.getModelConfigId());
         ModelProvider provider = config == null ? null : providerMapper.selectById(config.getProviderId());
         boolean isNew = provider == null || config == null;
-        if (isNew && (request == null || !StringUtils.hasText(request.getApiKey()))) throw new RuntimeException("请填写 API Key");
+        String apiKey = request != null && StringUtils.hasText(request.getApiKey())
+                ? request.getApiKey().trim()
+                : provider == null ? null : provider.getApiKey();
+        if (input.type() != ModelProviderType.OLLAMA && !StringUtils.hasText(apiKey)) {
+            throw new RuntimeException("请填写 API Key");
+        }
+
+        List<String> availableModelIds = fetchModelIds(input, apiKey);
+        if (!availableModelIds.contains(input.modelId())) {
+            throw new RuntimeException("模型 ID 不在该 API 返回的可用模型列表中，请重新选择");
+        }
+
         if (isNew) {
             provider = new ModelProvider();
             provider.setAuthType(AuthType.CONFIG);
@@ -124,18 +136,19 @@ public class ExamCandidateModelConfigServiceImpl implements ExamCandidateModelCo
         provider.setType(input.type());
         provider.setName("考试模型-" + campaignId + "-" + accountId);
         provider.setBaseUrl(input.baseUrl());
-        if (request != null && StringUtils.hasText(request.getApiKey())) provider.setApiKey(request.getApiKey().trim());
-        if (!StringUtils.hasText(provider.getApiKey()) && input.type() != ModelProviderType.OLLAMA) throw new RuntimeException("请填写 API Key");
+        provider.setApiKey(apiKey);
         if (isNew) {
             providerMapper.insert(provider);
             config.setProviderId(provider.getId());
             fillConfig(config, input);
+            markConnected(config);
             configMapper.insert(config);
             enrollment.setModelConfigId(config.getId());
             enrollmentMapper.updateById(enrollment);
         } else {
             providerMapper.updateById(provider);
             fillConfig(config, input);
+            markConnected(config);
             configMapper.updateById(config);
         }
         return toView(config, provider);
@@ -159,13 +172,13 @@ public class ExamCandidateModelConfigServiceImpl implements ExamCandidateModelCo
         if (CUSTOM_PROVIDER_KEY.equals(providerKey)) {
             if (!StringUtils.hasText(request.getBaseUrl())) throw new RuntimeException("请填写 OpenAI 兼容接口地址");
             return new ProviderInput(providerKey, "custom", "OpenAI 兼容", ModelProviderType.OPEN_AI,
-                    request.getBaseUrl().trim(), modelId(request, requireModelId));
+                    ModelEndpointValidator.normalizeHttpBaseUrl(request.getBaseUrl()), modelId(request, requireModelId));
         }
         ProviderPreset preset = PRESETS.stream().filter(item -> item.providerKey().equals(providerKey)
                 && item.schemeId().equals(schemeId)).findFirst()
                 .orElseThrow(() -> new RuntimeException("服务商接入方案无效"));
         return new ProviderInput(preset.providerKey(), preset.schemeId(), preset.providerName(), preset.type(),
-                preset.baseUrl(), modelId(request, requireModelId));
+                ModelEndpointValidator.normalizeHttpBaseUrl(preset.baseUrl()), modelId(request, requireModelId));
     }
 
     private String modelId(ExamCandidateModelConfigRequest request, boolean required) {
@@ -200,11 +213,7 @@ public class ExamCandidateModelConfigServiceImpl implements ExamCandidateModelCo
     }
 
     private String modelListEndpoint(ProviderInput input) {
-        String baseUrl = input.baseUrl().replaceAll("/+$", "");
-        URI uri = URI.create(baseUrl);
-        if (!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) {
-            throw new RuntimeException("API 基础地址仅支持 HTTP 或 HTTPS");
-        }
+        String baseUrl = ModelEndpointValidator.normalizeHttpBaseUrl(input.baseUrl());
         if (input.type() == ModelProviderType.OLLAMA) return baseUrl + "/api/tags";
         if (input.type() == ModelProviderType.DASH_SCOPE && !baseUrl.contains("compatible-mode")) return baseUrl + "/compatible-mode/v1/models";
         if (input.type() == ModelProviderType.ANTHROPIC) return baseUrl + "/v1/models";
@@ -253,6 +262,12 @@ public class ExamCandidateModelConfigServiceImpl implements ExamCandidateModelCo
         config.setConnectivityStatus("NOT_CHECKED");
         config.setConnectivityMessage(null);
         config.setLastConnectivityCheck(null);
+    }
+
+    private void markConnected(ModelConfig config) {
+        config.setConnectivityStatus("CONNECTED");
+        config.setConnectivityMessage("保存时连接检测通过");
+        config.setLastConnectivityCheck(LocalDateTime.now());
     }
 
     private ExamEnrollment findEnrollment(Long campaignId, Long accountId) {

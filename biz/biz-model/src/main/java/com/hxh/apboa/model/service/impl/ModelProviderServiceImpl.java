@@ -8,6 +8,7 @@ import com.hxh.apboa.common.consts.TableConst;
 import com.hxh.apboa.common.entity.ModelConfig;
 import com.hxh.apboa.common.entity.ModelProvider;
 import com.hxh.apboa.common.util.TenantUtils;
+import com.hxh.apboa.common.util.ModelEndpointValidator;
 import com.hxh.apboa.model.mapper.ModelConfigMapper;
 import com.hxh.apboa.model.mapper.ModelProviderMapper;
 import com.hxh.apboa.model.service.ModelProviderService;
@@ -34,6 +35,12 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
     private final MessagePublisher messagePublisher;
 
     @Override
+    public boolean save(ModelProvider entity) {
+        entity.setBaseUrl(ModelEndpointValidator.normalizeHttpBaseUrl(entity.getBaseUrl()));
+        return super.save(entity);
+    }
+
+    @Override
     public List<Object> usedWithModel(List<Long> ids) {
         List<Object> names = new ArrayList<>();
 
@@ -56,6 +63,9 @@ public class ModelProviderServiceImpl extends ServiceImpl<ModelProviderMapper, M
 
     @Override
     public boolean doUpdate(ModelProvider entity) {
+        if (entity.getBaseUrl() != null) {
+            entity.setBaseUrl(ModelEndpointValidator.normalizeHttpBaseUrl(entity.getBaseUrl()));
+        }
         if (entity.getId() != null && entity.getAuthType() == com.hxh.apboa.common.enums.AuthType.CONFIG
                 && !StringUtils.hasText(entity.getApiKey())) {
             ModelProvider current = getById(entity.getId());

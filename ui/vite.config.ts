@@ -96,6 +96,15 @@ export default defineConfig(({ mode }) => {
             return p.replace(/^\/web\/api/, '')
           },
         },
+        '/web/api/ws/': {
+          ws: true,
+          target: `http://127.0.0.1:${websocketPort}`,
+          changeOrigin: true,
+          timeout: 0,
+          rewrite: (p) => {
+            return p.replace(/^\/web\/api/, '')
+          },
+        },
         '/web/api': {
           ws: true,
           target: `http://127.0.0.1:${consolePort}`,
