@@ -5,6 +5,7 @@
 
 server:
   port: 3060
+  shutdown: graceful
   tomcat:
     threads:
       max: ${TOMCAT_THREADS_MAX:200}
@@ -12,6 +13,8 @@ server:
     max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
 
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
   task:
     scheduling:
       # 默认 1 个线程：收卷 / 阅卷 / 归档 / 清理会互相阻塞，这里至少拆开

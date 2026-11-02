@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -408,6 +409,19 @@ public class AguiMvcController {
             return "模型名称或模型配置不被上游接受，请检查模型配置";
         }
         return "AI 调用失败，请重试";
+    }
+
+    /** 容器关闭时释放 SSE 执行线程池与超时调度线程，避免拖慢 JVM 退出。 */
+    @PreDestroy
+    public void shutdown() {
+        try {
+            executorService.shutdownNow();
+        } catch (Exception ignored) {
+        }
+        try {
+            runTimeoutScheduler.shutdownNow();
+        } catch (Exception ignored) {
+        }
     }
 
     private void sendErrorAndComplete(

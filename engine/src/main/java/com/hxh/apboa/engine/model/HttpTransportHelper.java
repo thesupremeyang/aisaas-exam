@@ -28,6 +28,26 @@ public class HttpTransportHelper {
     /** key = 协议 + 超时组合 */
     private static final Map<String, HttpTransport> TRANSPORT_CACHE = new ConcurrentHashMap<>();
 
+    static {
+        // OkHttp 的 dispatcher 线程是非 daemon 的：JVM 退出时若不清，会把关机拖到 60s 以上
+        // （2026-11-02 实测 systemctl restart 卡满 90s 被 SIGKILL）。
+        Runtime.getRuntime()
+                .addShutdownHook(
+                        new Thread(HttpTransportHelper::shutdown, "http-transport-shutdown"));
+    }
+
+    /** 关闭所有缓存 transport 的连接池与 dispatcher 线程。 */
+    public static void shutdown() {
+        for (HttpTransport transport : TRANSPORT_CACHE.values()) {
+            try {
+                transport.close();
+            } catch (Exception ignored) {
+                // 退出路径上不再抛异常
+            }
+        }
+        TRANSPORT_CACHE.clear();
+    }
+
     public static HttpTransport createJdkHttpTransport() {
         return TRANSPORT_CACHE.computeIfAbsent(
                 "jdk",
