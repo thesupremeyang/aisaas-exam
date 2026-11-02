@@ -13,8 +13,18 @@ import io.agentscope.spring.boot.agui.common.DefaultAgentResolver;
 import io.agentscope.spring.boot.agui.common.ThreadSessionManager;
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +47,17 @@ public class AguiMvcController {
     private final ExecutorService executorService;
     private final ThreadSessionManager sessionManager;
     private final RunTracker runTracker;
+    private final AguiAgentRegistry registry;
+    private final Consumer<String> agentMissingHandler;
+    /** 单个 run 的总时长上限（毫秒），到点主动中断并给前端一个可读错误 */
+    private final long runTimeoutMs;
+    private final ScheduledExecutorService runTimeoutScheduler =
+            Executors.newSingleThreadScheduledExecutor(
+                    r -> {
+                        Thread t = new Thread(r, "agui-run-timeout");
+                        t.setDaemon(true);
+                        return t;
+                    });
 
     private AguiMvcController(Builder builder) {
         Session session = builder.session;
@@ -60,9 +81,12 @@ public class AguiMvcController {
         this.agentIdHeader =
                 builder.agentIdHeader != null ? builder.agentIdHeader : DEFAULT_AGENT_ID_HEADER;
         this.sseTimeout = builder.sseTimeout > 0 ? builder.sseTimeout : 600000L;
-        this.executorService = Executors.newCachedThreadPool();
+        this.executorService = buildExecutor(builder);
         this.sessionManager = builder.sessionManager;
         this.runTracker = builder.runTracker != null ? builder.runTracker : new RunTracker(this.encoder);
+        this.registry = builder.registry;
+        this.agentMissingHandler = builder.agentMissingHandler;
+        this.runTimeoutMs = builder.runTimeoutMs > 0 ? builder.runTimeoutMs : 120000L;
     }
 
     /**
@@ -89,16 +113,53 @@ public class AguiMvcController {
         return handleInternal(input, headerAgentId, pathAgentId);
     }
 
+    /**
+     * 构造 SSE 运行线程池。
+     *
+     * <p>原先使用 {@code Executors.newCachedThreadPool()}：线程数无上限、任务无队列，
+     * 一旦上游变慢就会出现「线程无限增长 + 没有背压」，最终整机被拖死而没有任何降级。
+     * 这里改为有界线程池：超过容量后立刻快速失败，并给前端一条明确的错误事件。</p>
+     */
+    private static ExecutorService buildExecutor(Builder builder) {
+        int core = builder.runThreadsCore > 0 ? builder.runThreadsCore : 32;
+        int max = builder.runThreadsMax > 0 ? builder.runThreadsMax : 256;
+        int queue = builder.runQueueCapacity >= 0 ? builder.runQueueCapacity : 128;
+        AtomicInteger seq = new AtomicInteger();
+        ThreadFactory factory =
+                r -> {
+                    Thread t = new Thread(r, "agui-run-" + seq.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                };
+        ThreadPoolExecutor executor =
+                new ThreadPoolExecutor(
+                        core,
+                        max,
+                        60L,
+                        TimeUnit.SECONDS,
+                        new ArrayBlockingQueue<>(Math.max(queue, 1)),
+                        factory,
+                        new ThreadPoolExecutor.AbortPolicy());
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
+
     private SseEmitter handleInternal(
             RunAgentInput input, String headerAgentId, String pathAgentId) {
         SseEmitter emitter = new SseEmitter(sseTimeout);
         String threadId = input.getThreadId();
         String runId = input.getRunId();
 
-        executorService.submit(
+        try {
+            executorService.submit(
                 () -> {
                     Disposable subscription = null;
+                    final AtomicReference<ScheduledFuture<?>> timeoutRef = new AtomicReference<>();
                     try {
+                        // 注册自愈：agent 可能因为 pub/sub 丢消息而没注册上，
+                        // 这里在进执行器前先补一次，避免考生被「Agent not found」直接打死。
+                        healAgentIfMissing(pathAgentId);
+
                         // 初始化上下文
                         AgentContext.init(input, threadId);
 
@@ -108,6 +169,15 @@ public class AguiMvcController {
 
                         // 注册到 RunTracker（在订阅前完成，保证事件不丢失）
                         runTracker.registerRun(threadId, result.agent(), null);
+
+                        // run 级总超时：上游"连得上但不返回"时，
+                        // 一个 run 会一直占着线程池槽位直到读超时（300s）。
+                        // 这里到点主动中断，并给前端一条可读错误。
+                        timeoutRef.set(
+                                runTimeoutScheduler.schedule(
+                                        () -> onRunTimeout(threadId, runId),
+                                        runTimeoutMs,
+                                        TimeUnit.MILLISECONDS));
 
                         // SSE 回调不再中断 Agent，仅清理 SSE 连接
                         emitter.onCompletion(
@@ -140,11 +210,28 @@ public class AguiMvcController {
                         subscription =
                                 result.events()
                                         .onErrorResume(e -> {
+                                            String reason = e != null ? e.getMessage() : null;
                                             logger.warn(
                                                     "Agent flux error for thread {}: {} -> {}",
                                                     threadId,
                                                     e != null ? e.getClass().getSimpleName() : "null",
-                                                    e != null ? e.getMessage() : "null");
+                                                    reason);
+                                            // 关键：异常必须变成一条前端可见的错误事件。
+                                            // 原先直接 Flux.empty() 会让 SSE 正常结束，
+                                            // 前端既没有回复也没有报错，考生只能反复重发。
+                                            try {
+                                                runTracker.pushEvent(
+                                                        threadId,
+                                                        new AguiEvent.Raw(
+                                                                threadId,
+                                                                runId,
+                                                                Map.of("error", friendlyError(reason))));
+                                            } catch (Exception pushError) {
+                                                logger.warn(
+                                                        "Failed to push agent error event for thread {}: {}",
+                                                        threadId,
+                                                        pushError.getMessage());
+                                            }
                                             return Flux.empty();
                                         })
                                         .subscribe(
@@ -155,12 +242,14 @@ public class AguiMvcController {
                                                             "Residual flux error for thread {}: {}",
                                                             threadId,
                                                             error != null ? error.getMessage() : "null");
+                                                    cancelQuietly(timeoutRef);
                                                     runTracker.markCompleted(threadId);
                                                 },
                                                 () -> {
                                                     logger.debug(
                                                             "AG-UI run stream completed for thread {}",
                                                             threadId);
+                                                    cancelQuietly(timeoutRef);
                                                     runTracker.markCompleted(threadId);
                                                 });
 
@@ -172,20 +261,153 @@ public class AguiMvcController {
 
                         AgentContext.clean();
 
-                        sendErrorAndComplete(emitter, threadId, runId, e.getMessage());
+                        cancelQuietly(timeoutRef);
+                        sendErrorAndComplete(emitter, threadId, runId, fuzzyMessage(e));
                     } catch (Exception e) {
                         logger.error("Error processing AG-UI request: {}", e.getMessage());
 
                         AgentContext.clean();
 
-                        sendErrorAndComplete(emitter, threadId, runId, e.getMessage());
+                        cancelQuietly(timeoutRef);
+                        sendErrorAndComplete(emitter, threadId, runId, fuzzyMessage(e));
                     } finally {
                         // 在同一个线程中清理上下文
                         AgentContext.clean();
                     }
                 });
+        } catch (RejectedExecutionException rejected) {
+            // 线程池已满：明确告诉前端「系统繁忙」，而不是让请求悬着或直接 500。
+            logger.warn(
+                    "AG-UI run rejected (pool saturated) thread={} run={} activeCount={}",
+                    threadId,
+                    runId,
+                    ((ThreadPoolExecutor) executorService).getActiveCount());
+            sendErrorAndComplete(emitter, threadId, runId, "系统繁忙，请稍后重试（并发已满）");
+        }
 
         return emitter;
+    }
+
+    /**
+     * 注册自愈：当路径里带了 agentCode 但注册表里没有时，尝试从库里补注册一次。
+     *
+     * <p>平台创建智能体后依靠 Redis pub/sub 通知 runtime 注册，消息一旦丢失，
+     * 该智能体会一直 404 直到人工重启。这里做一次同步补注册，代价是一条主键查询。</p>
+     */
+    private void healAgentIfMissing(String pathAgentId) {
+        if (pathAgentId == null
+                || pathAgentId.isEmpty()
+                || registry == null
+                || agentMissingHandler == null) {
+            return;
+        }
+        boolean present = true;
+        try {
+            present = registry.contains(pathAgentId);
+        } catch (Throwable ignore) {
+            // 同名类可能来自依赖包（没有 contains）：此时保守跳过，靠定时对账兜底
+            present = true;
+        }
+        if (present) {
+            return;
+        }
+        try {
+            logger.warn("Agent {} not registered, trying self-heal", pathAgentId);
+            agentMissingHandler.accept(pathAgentId);
+        } catch (Exception e) {
+            logger.warn("Agent self-heal failed for {}: {}", pathAgentId, e.getMessage());
+        }
+    }
+
+    /**
+     * run 总超时处理：中断 agent，并给前端一条明确错误。
+     */
+    private void onRunTimeout(String threadId, String runId) {
+        if (!runTracker.getStatus(threadId)) {
+            return;
+        }
+        logger.warn(
+                "AG-UI run timed out after {} ms, thread={} run={}",
+                runTimeoutMs,
+                threadId,
+                runId);
+        try {
+            runTracker.pushEvent(
+                    threadId,
+                    new AguiEvent.Raw(
+                            threadId,
+                            runId,
+                            Map.of(
+                                    "error",
+                                    "AI 响应超时（超过 " + (runTimeoutMs / 1000) + " 秒），请重试")));
+            runTracker.pushEvent(
+                    threadId, new AguiEvent.RunFinished(threadId, runId));
+        } catch (Exception e) {
+            logger.warn("Failed to push run-timeout event: {}", e.getMessage());
+        }
+        try {
+            runTracker.stopRun(threadId);
+        } catch (Exception e) {
+            logger.warn("Failed to stop timed-out run: {}", e.getMessage());
+        }
+        runTracker.markCompleted(threadId);
+    }
+
+    private static void cancelQuietly(AtomicReference<ScheduledFuture<?>> ref) {
+        ScheduledFuture<?> future = ref == null ? null : ref.get();
+        if (future != null) {
+            future.cancel(false);
+        }
+    }
+
+    /**
+     * 业务侧异常转可读文案；未知异常保留原文，避免丢掉"会话已归档"这类有效提示。
+     */
+    private static String fuzzyMessage(Throwable e) {
+        String msg = e == null ? null : e.getMessage();
+        if (msg == null || msg.isBlank()) {
+            return "AI 调用失败，请重试";
+        }
+        String lower = msg.toLowerCase();
+        if (lower.contains("agent not found")) {
+            return "智能体尚未就绪，正在自动修复，请 10 秒后重试";
+        }
+        if (lower.contains("401") || lower.contains("authentication")) {
+            return "模型鉴权失败，请检查 API Key 配置";
+        }
+        return msg;
+    }
+
+    /**
+     * 把上游异常翻译成考生能看懂的提示。
+     *
+     * <p>只暴露「该查哪一处配置」，不回显上游原始报文（里面可能带 key 片段）。</p>
+     */
+    private static String friendlyError(String reason) {
+        String raw = reason == null ? "" : reason.trim();
+        String lower = raw.toLowerCase();
+        if (raw.isEmpty()) {
+            return "AI 调用失败，请重试";
+        }
+        if (lower.contains("agent not found")) {
+            return "智能体尚未就绪，正在自动修复，请 10 秒后重试";
+        }
+        if (lower.contains("401") || lower.contains("authentication") || lower.contains("invalid api key")) {
+            return "模型鉴权失败，请检查 API Key 配置";
+        }
+        if (lower.contains("429") || lower.contains("rate limit") || lower.contains("quota")) {
+            return "模型调用被限流，请稍后重试";
+        }
+        if (lower.contains("timeout") || lower.contains("timed out")) {
+            return "AI 响应超时，请重试";
+        }
+        if (lower.contains("max_tokens") || lower.contains("invalidparameter")) {
+            return "模型参数超出上游允许范围，请检查 max_tokens 等配置";
+        }
+        if (lower.contains("model")) {
+            return "模型名称或模型配置不被上游接受，请检查模型配置";
+        }
+        return "AI 调用失败，请重试";
     }
 
     private void sendErrorAndComplete(
@@ -290,6 +512,66 @@ public class AguiMvcController {
         private Session session;
         private JdbcTemplate jdbcTemplate;
         private RunTracker runTracker;
+        private Consumer<String> agentMissingHandler;
+        private int runThreadsCore = 32;
+        private int runThreadsMax = 256;
+        private int runQueueCapacity = 128;
+        private long runTimeoutMs = 120000L;
+
+        /**
+         * 注册自愈回调：当请求里的 agentCode 不在注册表时被调用一次。
+         *
+         * @param handler 入参为 agentCode
+         * @return This builder
+         */
+        public Builder agentMissingHandler(Consumer<String> handler) {
+            this.agentMissingHandler = handler;
+            return this;
+        }
+
+        /**
+         * SSE 执行线程池核心线程数。
+         *
+         * @param core 核心线程数
+         * @return This builder
+         */
+        public Builder runThreadsCore(int core) {
+            this.runThreadsCore = core;
+            return this;
+        }
+
+        /**
+         * SSE 执行线程池最大线程数（超过后快速失败）。
+         *
+         * @param max 最大线程数
+         * @return This builder
+         */
+        public Builder runThreadsMax(int max) {
+            this.runThreadsMax = max;
+            return this;
+        }
+
+        /**
+         * SSE 执行线程池等待队列长度。
+         *
+         * @param capacity 队列长度
+         * @return This builder
+         */
+        public Builder runQueueCapacity(int capacity) {
+            this.runQueueCapacity = capacity;
+            return this;
+        }
+
+        /**
+         * 单个 run 的总时长上限（毫秒）。0 或负数按 120000 处理。
+         *
+         * @param timeoutMs 超时毫秒
+         * @return This builder
+         */
+        public Builder runTimeoutMs(long timeoutMs) {
+            this.runTimeoutMs = timeoutMs;
+            return this;
+        }
 
         /**
          * Set the agent registry.

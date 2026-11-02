@@ -7,6 +7,7 @@ import com.hxh.apboa.assessment.mapper.ExamEnrollmentMapper;
 import com.hxh.apboa.assessment.mapper.ExamQuestionMapper;
 import com.hxh.apboa.assessment.mapper.ExamSubmissionMapper;
 import com.hxh.apboa.assessment.mapper.AssessmentResultMapper;
+import com.hxh.apboa.assessment.mapper.AssessmentReviewMapper;
 import com.hxh.apboa.assessment.service.AssessmentRubric;
 import com.hxh.apboa.assessment.service.CandidateExamService;
 import com.hxh.apboa.assessment.service.ExamCampaignTiming;
@@ -17,6 +18,7 @@ import com.hxh.apboa.agent.service.AgentDefinitionService;
 import com.hxh.apboa.common.exception.BusinessException;
 import com.hxh.apboa.common.entity.AgentDefinition;
 import com.hxh.apboa.common.entity.AssessmentResult;
+import com.hxh.apboa.common.entity.AssessmentReview;
 import com.hxh.apboa.common.entity.ExamCampaign;
 import com.hxh.apboa.common.entity.ExamEnrollment;
 import com.hxh.apboa.common.entity.ExamQuestion;
@@ -54,6 +56,7 @@ public class CandidateExamServiceImpl implements CandidateExamService {
     private final ExamQuestionMapper questionMapper;
     private final ExamSubmissionMapper submissionMapper;
     private final AssessmentResultMapper resultMapper;
+    private final AssessmentReviewMapper reviewMapper;
     private final AgentDefinitionMapper agentDefinitionMapper;
     private final AgentDefinitionService agentDefinitionService;
     private final ExamSsoService ssoService;
@@ -176,10 +179,17 @@ public class CandidateExamServiceImpl implements CandidateExamService {
                         .apply("del_flag = 0"))
                 .stream().collect(Collectors.toMap(AssessmentResult::getSubmissionId, r -> r,
                         (first, ignored) -> first));
+        Map<Long, AssessmentReview> reviewBySubmission = submissionIds.isEmpty() ? Map.of()
+                : reviewMapper.selectList(new LambdaQueryWrapper<AssessmentReview>()
+                        .in(AssessmentReview::getSubmissionId, submissionIds))
+                .stream().collect(Collectors.toMap(AssessmentReview::getSubmissionId, r -> r,
+                        (first, ignored) -> first, HashMap::new));
 
+        // 实操分优先取发布时固化的值；未发布但已有复核结果时按已复核题目求和，
+        // 不再要求「每一份提交都有成绩」——那样只要有一题没复核，考生就一分都看不到。
         Integer practicalScore = enrollment.getPracticalScore();
-        if (practicalScore == null && !submissionIds.isEmpty()
-                && resultBySubmission.size() == submissionIds.size()) {
+        boolean practicalPublished = practicalScore != null;
+        if (practicalScore == null && !resultBySubmission.isEmpty()) {
             practicalScore = resultBySubmission.values().stream()
                     .map(AssessmentResult::getFinalScore)
                     .filter(Objects::nonNull)
@@ -191,6 +201,8 @@ public class CandidateExamServiceImpl implements CandidateExamService {
         score.setCampaignName(campaign.getName());
         score.setTheoryScore(enrollment.getTheoryScore());
         score.setPracticalScore(practicalScore);
+        score.setTheoryScoreEntered(enrollment.getTheoryScore() != null);
+        score.setPracticalScorePublished(practicalPublished);
         if (score.getTheoryScore() != null && practicalScore != null) {
             score.setTotalScore(BigDecimal.valueOf(score.getTheoryScore())
                     .multiply(BigDecimal.valueOf(0.2d))
@@ -222,6 +234,14 @@ public class CandidateExamServiceImpl implements CandidateExamService {
                 item.setSubmissionId(submission.getId());
                 item.setAgentId(submission.getAgentId());
                 item.setAgentName(agent == null ? null : agent.getName());
+                AssessmentResult result = resultBySubmission.get(submission.getId());
+                if (result != null) {
+                    item.setFinalScore(result.getFinalScore());
+                }
+                AssessmentReview review = reviewBySubmission.get(submission.getId());
+                if (review != null) {
+                    item.setReviewComment(review.getComment());
+                }
             }
             questionScores.add(item);
         }
@@ -318,22 +338,32 @@ public class CandidateExamServiceImpl implements CandidateExamService {
                 .select(ExamSubmission::getVersion))
                 .stream().mapToInt(s -> s.getVersion() == null ? 0 : s.getVersion()).max().orElse(0);
         String prefillFormJson = resolvePrefillFormJson(enrollmentId);
-        for (int attempt = 0; attempt < 50; attempt++) {
-            var submission = new ExamSubmission();
-            submission.setEnrollmentId(enrollment.getId());
-            submission.setQuestionId(questionId);
-            submission.setWorkType("AGENT");
-            submission.setCurrentStep(1);
-            submission.setStatus("DRAFT");
-            submission.setFormJson(prefillFormJson);
-            submission.setVersion(baseMax + 1 + attempt);
-            try {
-                submissionMapper.insert(submission);
-                return submission;
-            } catch (DuplicateKeyException ignored) {
+        var submission = new ExamSubmission();
+        submission.setEnrollmentId(enrollment.getId());
+        submission.setQuestionId(questionId);
+        submission.setWorkType("AGENT");
+        submission.setCurrentStep(1);
+        submission.setStatus("DRAFT");
+        submission.setFormJson(prefillFormJson);
+        submission.setVersion(baseMax + 1);
+        try {
+            submissionMapper.insert(submission);
+            return submission;
+        } catch (DuplicateKeyException duplicated) {
+            // 并发兜底：上面的 selectCount 是 check-then-act，双击/重试/多标签页时
+            // 两个请求可能同时通过检查。数据库唯一键（active_pair）会拦下第二个，
+            // 这里直接返回已存在的那条，保持接口幂等，而不是抛错给考生。
+            var existing = submissionMapper.selectOne(new LambdaQueryWrapper<ExamSubmission>()
+                    .eq(ExamSubmission::getEnrollmentId, enrollmentId)
+                    .eq(ExamSubmission::getQuestionId, questionId)
+                    .apply("del_flag = 0")
+                    .orderByAsc(ExamSubmission::getId)
+                    .last("limit 1"));
+            if (existing != null) {
+                return existing;
             }
+            throw new IllegalStateException("该试题已有提交记录，请勿重复创建");
         }
-        throw new IllegalStateException("创建作品失败，请稍后重试");
     }
 
     @Override

@@ -1,13 +1,20 @@
 export const WS_CONFIG = {
   URL: (() => {
+    const isHttps = window.location.protocol === 'https:'
+    const protocol = isHttps ? 'wss:' : 'ws:'
     const base = ((import.meta.env.VITE_APP_BASE_API as string) || '').replace(/\/$/, '')
-    return `ws://${window.location.hostname}:${window.location.port}${base}/api/ws/apboa`
+    return `${protocol}//${window.location.hostname}${window.location.port ? ':' + window.location.port : ''}${base}/api/ws/apboa`
   })(),
-  MAX_RECONNECT_ATTEMPTS: 1440, // 约6小时
-  INITIAL_RECONNECT_DELAY: 45000, // 45秒
-  MAX_RECONNECT_DELAY: 300000, // 最大重连延迟5分钟
-  PING_INTERVAL: 30000, // 30秒发送一次ping
-  PONG_TIMEOUT: 5000, // 等待pong响应超时时间
+  // ⚠️ 本文件是历史遗留副本，真正生效的是 src/websocket/const/websocket.ts。
+  // 这里保持与之一致（9/5 事故后收敛为 40 次 / 10 分钟），避免两处参数打架。
+  MAX_RECONNECT_ATTEMPTS: 40,
+  INITIAL_RECONNECT_DELAY: 800,
+  MAX_RECONNECT_DELAY: 30000,
+  SLOW_RECONNECT_DELAY: 15000,
+  RECONNECT_WINDOW_MS: 10 * 60 * 1000,
+  RECONNECT_JITTER: 0.3,
+  PING_INTERVAL: 20000,
+  PONG_TIMEOUT: 8000,
 };
 
 export const WS_MESSAGE_TYPES = {

@@ -5,6 +5,23 @@
 
 server:
   port: 3061
+  tomcat:
+    threads:
+      max: ${TOMCAT_THREADS_MAX:200}
+    accept-count: ${TOMCAT_ACCEPT_COUNT:200}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+
+# SSE 执行线程池（有界 + 快速失败，超过容量返回「系统繁忙」而不是无限建线程）
+apboa:
+  agui:
+    run-threads-core: ${AGUI_RUN_THREADS_CORE:32}
+    run-threads-max: ${AGUI_RUN_THREADS_MAX:256}
+    run-queue-capacity: ${AGUI_RUN_QUEUE_CAPACITY:128}
+    run-timeout-ms: ${AGUI_RUN_TIMEOUT_MS:120000}
+  agent:
+    reconcile:
+      initial-delay-ms: ${AGENT_RECONCILE_INITIAL_DELAY_MS:60000}
+      interval-ms: ${AGENT_RECONCILE_INTERVAL_MS:120000}
 
 agentscope:
   agui:
@@ -15,6 +32,11 @@ agentscope:
     max-thread-sessions: 1000
 
 spring:
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
+      thread-name-prefix: sched-
   data:
     redis:
       host: ${REDIS_HOST:apboa-redis}
@@ -24,22 +46,23 @@ spring:
       timeout: 2000ms
       lettuce:
         pool:
-          max-active: 8
-          max-idle: 8
+          max-active: ${REDIS_POOL_MAX_ACTIVE:32}
+          max-idle: ${REDIS_POOL_MAX_IDLE:16}
           min-idle: 0
-          max-wait: -1ms
+          max-wait: ${REDIS_POOL_MAX_WAIT:200ms}
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://${MYSQL_HOST:apboa-mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:apboa_next}?useSSL=false&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&serverTimezone=GMT%2B8&nullCatalogMeansCurrent=true&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST:apboa-mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:apboa_next}?useSSL=false&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&transformedBitIsBoolean=true&serverTimezone=GMT%2B8&nullCatalogMeansCurrent=true&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=60000
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:root}
     druid:
       initial-size: 5
       min-idle: 5
-      max-active: 20
-      max-wait: 60000
+      max-active: ${DB_POOL_MAX_ACTIVE:20}
+      max-wait: ${DB_POOL_MAX_WAIT:5000}
       validation-query: SELECT 1
+      validation-query-timeout: 5
       test-on-borrow: false
       test-on-return: false
       test-while-idle: true

@@ -57,6 +57,22 @@ public class AguiAgentRegistry {
     }
 
     /**
+     * 判断某个 agentCode 是否已注册。
+     *
+     * <p>与 {@link #getAgent(String)} 不同，这里只查表、不会触发工厂创建实例，
+     * 因此可以安全地用在每个请求的热路径上（注册自检与自愈）。</p>
+     *
+     * @param agentId 智能体编码
+     * @return 已注册返回 true
+     */
+    public boolean contains(String agentId) {
+        if (agentId == null || agentId.isEmpty()) {
+            return false;
+        }
+        return agentFactories.containsKey(agentId) || singletonAgents.containsKey(agentId);
+    }
+
+    /**
      * Register a singleton agent with the given ID.
      *
      * <p>The same agent instance will be returned for all requests with this ID.

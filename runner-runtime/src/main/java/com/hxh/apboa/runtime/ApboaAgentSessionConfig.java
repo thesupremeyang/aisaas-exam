@@ -1,6 +1,7 @@
 package com.hxh.apboa.runtime;
 
 import com.hxh.apboa.common.consts.TableConst;
+import com.hxh.apboa.engine.agui.AguiAgentConfiguration;
 import io.agentscope.core.agui.adapter.AguiAdapterConfig;
 import io.agentscope.core.agui.registry.AguiAgentRegistry;
 import io.agentscope.core.session.Session;
@@ -10,6 +11,7 @@ import io.agentscope.spring.boot.agui.common.ThreadSessionManager;
 import io.agentscope.spring.boot.agui.mvc.AguiMvcController;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -221,8 +223,13 @@ public class ApboaAgentSessionConfig {
             @Autowired JdbcTemplate jdbcTemplate,
             @Autowired(required = false) AguiAgentRegistry registry,
             @Autowired(required = false) ThreadSessionManager sessionManager,
+            @Autowired(required = false) AguiAgentConfiguration aguiAgentConfiguration,
             AguiProperties props,
-            Session session) {
+            Session session,
+            @Value("${apboa.agui.run-threads-core:32}") int runThreadsCore,
+            @Value("${apboa.agui.run-threads-max:256}") int runThreadsMax,
+            @Value("${apboa.agui.run-queue-capacity:128}") int runQueueCapacity,
+            @Value("${apboa.agui.run-timeout-ms:120000}") long runTimeoutMs) {
 
         if (registry == null) {
             log.warn("AguiAgentRegistry not found, skip AguiMvcController configuration");
@@ -240,6 +247,14 @@ public class ApboaAgentSessionConfig {
                 .session(session)
                 .jdbcTemplate(jdbcTemplate)
                 .sseTimeout(600000L)
+                .runThreadsCore(runThreadsCore)
+                .runThreadsMax(runThreadsMax)
+                .runQueueCapacity(runQueueCapacity)
+                .runTimeoutMs(runTimeoutMs)
+                .agentMissingHandler(
+                        aguiAgentConfiguration != null
+                                ? aguiAgentConfiguration::reRegisterAgentByCode
+                                : null)
                 .config(buildAguiAdapterConfig(props))
                 .build();
     }

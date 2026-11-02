@@ -41,7 +41,6 @@ import {
 import setting from "@/config/setting.ts";
 
 const APP_BASE_API = ((import.meta.env.VITE_APP_BASE_API as string) || '').replace(/\/$/, '')
-const APP_LOGIN_URL = `${((import.meta.env.BASE_URL as string) || '/').replace(/\/?$/, '/')}#/login`
 
 
 /** 事件处理器集合 */
@@ -154,6 +153,9 @@ export class AgentClient {
         })
 
         // 处理 401 未授权
+        // 注意：这里不再 `window.location.href = 登录页 + reload`。
+        // 考试中整页跳转会清掉答题页状态（9/5 那天考生被反复踢出去就是这个），
+        // 改为发一条 RUN_ERROR，由页面提示"登录已过期"，让考生自己决定何时重新登录。
         if (response.status === 401) {
           if (retryCount < MAX_RETRIES) {
             retryCount++
@@ -162,8 +164,7 @@ export class AgentClient {
             try {
               const refreshToken = getRefreshToken()
               if (!refreshToken) {
-                window.location.href = APP_LOGIN_URL;
-                window.location.reload();
+                this.emitAuthExpired()
                 return
               }
 
@@ -177,7 +178,8 @@ export class AgentClient {
               })
 
               if (!refreshResponse.ok) {
-                window.location.href = APP_LOGIN_URL;
+                this.emitAuthExpired()
+                return
               }
 
               const data = await refreshResponse.json()
@@ -205,23 +207,19 @@ export class AgentClient {
                 // 重试原始请求
                 await executeRequest()
                 return
-              } else {
-                window.location.href = APP_LOGIN_URL;
-                window.location.reload();
               }
+              this.emitAuthExpired()
+              return
             } catch (refreshError) {
               console.error('Token refresh failed:', refreshError)
               removeToken()
               removeRefreshToken()
-              window.location.href = APP_LOGIN_URL;
-              window.location.reload();
+              this.emitAuthExpired()
               return
             }
-          } else {
-            window.location.href = APP_LOGIN_URL;
-            window.location.reload();
-            return
           }
+          this.emitAuthExpired()
+          return
         }
 
         if (!response.ok) {
@@ -324,6 +322,20 @@ export class AgentClient {
     } finally {
       reader.releaseLock()
     }
+  }
+
+  /**
+   * 登录态失效（401 且刷新失败）时统一走这里。
+   *
+   * <p>不再整页跳登录：考试中跳转会丢掉当前答题页与未保存内容。
+   * 只发一条 RUN_ERROR，由对话页展示「登录已过期」，考生可自行重新登录。</p>
+   */
+  private emitAuthExpired(): void {
+    this.handleEvent({
+      type: 'RUN_ERROR',
+      message: '登录状态已过期，请重新登录后再继续（当前页面内容已尽量保留）',
+      code: '401'
+    } as RunErrorEvent)
   }
 
   /**

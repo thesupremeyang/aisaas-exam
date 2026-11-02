@@ -201,6 +201,29 @@ export function useChatStream(
           toolCallsInProgress.value.forEach(item => item.needConfirm = true)
         }
       },
+      // 运行级失败（HTTP 非 200 / 网络中断 / 后端 RUN_ERROR）必须让考生看见并留痕，
+      // 否则表现就是「消息发出去了、AI 不说话、也不报错」，考生只能反复重发。
+      onRunError: (e) => {
+        const text = e?.message ? `AI 调用失败：${e.message}` : 'AI 调用失败，请重试'
+        const sid = currentSessionId.value
+        if (sid) {
+          onMessageSaved?.({
+            id: new Date().getTime() + '' + Math.floor(Math.random() * 90000) + 10000,
+            sessionId: sid,
+            role: 'error',
+            content: text,
+            parentId: '',
+            path: '',
+            depth: 0,
+            createdAt: ''
+          } as ChatMessageVO)
+        }
+        streamingMessageId.value = null
+        streamingContent.value = ''
+        streamingRole.value = 'system'
+        agentHasResult.value = true
+        message.error(text)
+      },
       onRaw: (event) => {
         const e = event as RawEvent
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -333,7 +356,7 @@ export function useChatStream(
     if (!inputText.trim() && !effectiveFileIds.length) return
     if (isRunning.value) return
     if (!agentDetail.value?.agentCode) {
-      message.error('智能体信息未加载完成，请稍后再试')
+      message.warning('智能体信息未加载完成，请稍后再试')
       return
     }
 
