@@ -5,7 +5,6 @@ import {
   AppstoreOutlined,
   ArrowLeftOutlined,
   ArrowRightOutlined,
-  BellOutlined,
   CloseOutlined,
   DownOutlined,
   PlusOutlined,
@@ -21,6 +20,7 @@ import type { AgentDefinitionVO } from '@/types'
 import { RouteNames, RoutePaths } from '@/router/constants'
 import { runCloneAgentFlow } from '@/composables/useAgentCloneFlow'
 import { useAccountStore } from '@/stores'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import Chat from '@/views/Chat/index.vue'
 
@@ -114,7 +114,7 @@ const userLabel = computed(() =>
     : '登录',
 )
 const isPlatformAdmin = computed(
-  () => accountStore.userInfo?.username?.toLowerCase() === 'admin',
+  () => isPlatformAdminUsername(accountStore.userInfo?.username),
 )
 
 const isDefaultTenant = computed(() => {
@@ -373,9 +373,6 @@ onBeforeUnmount(() => {
           </label>
           <button class="mine" type="button" @click="openMineAgents">
             <AppstoreOutlined />我的智能体
-          </button>
-          <button class="icon-btn" type="button" aria-label="通知">
-            <BellOutlined />
           </button>
           <ADropdown :trigger="['click']" placement="bottomRight">
             <button class="avatar" type="button" :aria-label="userLabel" :title="userLabel">

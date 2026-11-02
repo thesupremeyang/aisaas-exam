@@ -133,12 +133,13 @@ public class ExamCampaignAdminServiceImpl implements ExamCampaignAdminService {
     @Transactional(rollbackFor = Exception.class)
     public ExamCampaign updateScoreQueryEnabled(Long campaignId, Boolean enabled) {
         if (enabled == null) {
-            throw new BusinessException("请指定是否开启查分模式");
+            throw new BusinessException("请指定开启或关闭查分模式");
         }
         ExamCampaign campaign = findCampaign(campaignId);
         if (enabled && ExamCampaignTiming.state(campaign, LocalDateTime.now()) != ExamCampaignTiming.State.ENDED) {
             throw new BusinessException("考试结束后才可以开启查分模式");
         }
+        // 关闭查分不限制考试状态，便于随时收回考生查分入口
         campaign.setConfigJson(ExamCampaignScoreMode.withEnabled(campaign.getConfigJson(), enabled));
         ExamCampaignScoreMode.decorate(campaign);
         campaignMapper.updateById(campaign);

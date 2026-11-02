@@ -22,6 +22,16 @@ export const useAgentStore = defineStore('agent', () => {
   const pageSize = ref<number>(50)
 
   /**
+   * 管理员查看模式：从「答卷管理」进入考生智能体配置界面时，
+   * 列表按该考生租户过滤（后端仅对平台管理员生效）。
+   */
+  const viewTenantId = ref<string | number | null>(null)
+
+  function setViewTenantId(value: string | number | null) {
+    viewTenantId.value = value
+  }
+
+  /**
    * 获取标签列表
    */
   async function fetchTags() {
@@ -48,7 +58,8 @@ export const useAgentStore = defineStore('agent', () => {
         size: pageSize.value,
         name: keyword.value || undefined,
         tag: selectedTag.value || undefined,
-        agentType: (selectedAgentType.value as 'CUSTOM' | 'A2A') || undefined
+        agentType: (selectedAgentType.value as 'CUSTOM' | 'A2A') || undefined,
+        viewTenantId: viewTenantId.value || undefined
       }
 
       const response = await agentApi.page(query)
@@ -171,6 +182,8 @@ export const useAgentStore = defineStore('agent', () => {
     keyword,
     loading,
     hasMore,
+    viewTenantId,
+    setViewTenantId,
     fetchTags,
     fetchPage,
     loadMore,

@@ -31,6 +31,15 @@ assessment:
     system-prompt: ${ASSESSMENT_ARK_SYSTEM_PROMPT:你是严格的考试评审专家。请依据下方评分量表与考生提交材料进行真实评分。评分铁律：1)必须先判断提交材料是否有效、实质性：若内容为空、长度过短、或仅为无意义的乱填字符（如重复的1/2/3/4/5、纯数字、与题目无关的占位文本、复制粘贴的无关内容等），一律认定为【无效作答】，各维度必须给最低分，最终总分需低于及格线（PASS等级线），并在conclusion中明确说明“内容无效/乱填，判定不及格”。2)只有材料真实、具体、切题时，才按质量给分，严禁平均主义或人情分。3)仅输出JSON，包含dimensionScores（各维度整数分）、totalScore（整数总分）、confidence、conclusion、evidence。4)必须严格依据给定评分量表维度与满分上限打分，totalScore必须等于各维度分之和。}
     # 外部模型偶发排队时可能超过 30 秒；保留环境变量覆盖能力，默认给一次完整请求 90 秒。
     timeout: ${ASSESSMENT_ARK_TIMEOUT:90s}
+  # AI 阅卷（配置评分）大模型：与旧智评 ark 通道同构、配置独立
+  grading:
+    enabled: ${ASSESSMENT_GRADING_ENABLED:false}
+    endpoint: ${ASSESSMENT_GRADING_ENDPOINT:https://ark.cn-beijing.volces.com/api/coding/v3/chat/completions}
+    api-key: ${ASSESSMENT_GRADING_API_KEY:}
+    model: ${ASSESSMENT_GRADING_MODEL:deepseek-v4-flash}
+    timeout: ${ASSESSMENT_GRADING_TIMEOUT:180s}
+    temperature: ${ASSESSMENT_GRADING_TEMPERATURE:0.1}
+    worker-fixed-delay-ms: ${ASSESSMENT_GRADING_WORKER_DELAY_MS:3000}
 
 # Comma-separated HTTPS origins permitted as SSO return targets. Relative portal routes remain allowed.
 exam:

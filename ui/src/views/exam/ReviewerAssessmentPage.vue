@@ -72,7 +72,7 @@ async function load() {
   try {
     hydrate(await examStore.loadReview(props.submissionId))
   } catch {
-    message.error('无法加载复核信息，请稍后重试')
+    message.warning('无法加载复核信息，请稍后重试')
   }
 }
 
@@ -82,7 +82,7 @@ async function save() {
     await examStore.saveReview(props.submissionId, payload())
     message.success('复核草稿已保存')
   } catch {
-    message.error('保存复核草稿失败')
+    message.warning('保存复核草稿失败')
   }
 }
 
@@ -98,7 +98,7 @@ function publish() {
         await examStore.publishReview(props.submissionId)
         message.success('最终成绩已发布')
       } catch {
-        message.error('成绩发布失败，请稍后重试')
+        message.warning('成绩发布失败，请稍后重试')
       }
     },
   })

@@ -8,7 +8,8 @@ import type { Router } from 'vue-router'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 import { useAccountStore } from '@/stores'
-import { WHITE_LIST } from './constants'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
+import { RoutePaths, WHITE_LIST } from './constants'
 
 // 配置NProgress
 NProgress.configure({
@@ -72,12 +73,23 @@ export function setupRouterGuard(router: Router): void {
           }
         }
 
-        // 平台管理员不进入考生考试门户，避免被要求报名
-        const isPlatformAdmin = accountStore.userInfo?.username?.toLowerCase() === 'admin'
-        if (isPlatformAdmin && to.path === '/exam/portal') {
-          next({ path: '/agent' })
-          NProgress.done()
-          return
+        // 平台管理员不进入考生考试门户，避免被要求报名；改落考试场次管理页
+        // （侧栏已对平台管理员隐藏"我的专属空间"，不能再落 /agent，
+        //   否则登录后会停留在一个菜单上没有入口的智能体管理页面）
+        // "查看考生配置"模拟态例外：模拟态本身就需要停留在 /agent。
+        const isPlatformAdmin = isPlatformAdminUsername(accountStore.userInfo?.username)
+        if (isPlatformAdmin && !accountStore.isTenantViewActive) {
+          if (to.path === '/exam/portal') {
+            next({ path: `/${RoutePaths.EXAM_ADMIN}` })
+            NProgress.done()
+            return
+          }
+          // 兜底：管理员手动访问 /agent（如历史收藏/回退）时回到管理员端
+          if (to.path === `/${RoutePaths.AGENT}`) {
+            next({ path: `/${RoutePaths.EXAM_ADMIN}` })
+            NProgress.done()
+            return
+          }
         }
 
         next()

@@ -661,7 +661,7 @@ const formatCode = () => {
     }
   } catch (error) {
     console.error('格式化失败:', error)
-    message.error('格式化失败')
+    message.warning('格式化失败')
   }
 }
 
@@ -675,7 +675,7 @@ const copyToClipboard = async () => {
     message.success('复制成功')
   } catch (err) {
     console.error('复制失败:', err)
-    message.error('复制失败')
+    message.warning('复制失败')
   }
 }
 

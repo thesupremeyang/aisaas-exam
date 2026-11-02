@@ -89,4 +89,31 @@ public interface AccountService extends IService<Account> {
      * @return 登录响应（含租户上下文的 token）
      */
     LoginResponse selectTenant(SelectTenantRequest request);
+
+    /**
+     * 平台管理员创建账号（不强制邮箱与租户归属，可直接授予平台管理员身份）
+     *
+     * @param request 创建请求
+     * @return 是否成功
+     */
+    boolean createPlatformAccount(PlatformAccountCreateRequest request);
+
+    /**
+     * 设置/取消平台管理员标记（内置 admin 账号不可取消）
+     *
+     * @param id   账号ID
+     * @param flag 是否平台管理员
+     * @return 是否成功
+     */
+    boolean setPlatformAdmin(Long id, Boolean flag);
+
+    /**
+     * 平台管理员进入考生租户查看：签发一个"模拟令牌"——管理员身份、考生租户上下文、
+     * platformAdmin=false（不豁免跨租户）。模拟态下所有页面（智能体/Skill/知识库等）
+     * 天然只显示该考生租户的内容；退出查看后换回管理员原令牌。
+     *
+     * @param tenantId 考生租户ID
+     * @return 模拟登录响应（accessToken/userDetail）
+     */
+    LoginResponse viewTenantAsAdmin(Long tenantId);
 }

@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { type AxiosRequestConfig } from "axios";
 import { tansRequestParams, checkRequestRepeat } from "@/utils/tools";
 import {
   getRequestToken,
@@ -16,6 +16,19 @@ import { refreshToken as refreshTokenApi } from "@/api/auth";
 
 type TokenRefreshCallback = (newToken: string) => void;
 
+declare module "axios" {
+  export interface AxiosRequestConfig {
+    /** 轮询/后台请求：不在拦截器里弹任何提示 */
+    silent?: boolean;
+    /**
+     * 传输层失败自动重试次数。
+     * 默认 GET / silent 请求重试 2 次；写操作默认不自动重试（避免重复提交）。
+     * 传 false 关闭；传数字覆盖次数。
+     */
+    retry?: boolean | number;
+  }
+}
+
 NProgress.configure({ easing: "ease", speed: 150, showSpinner: false });
 
 const instance = axios.create({
@@ -28,6 +41,61 @@ const APP_LOGIN_URL = `${((import.meta.env.BASE_URL as string) || '/').replace(/
 let isRefreshing = false;
 // 存储等待刷新令牌完成后重试的请求
 let requestsQueue:TokenRefreshCallback[] = [];
+
+function isGetMethod(config?: AxiosRequestConfig): boolean {
+  return (config?.method || "get").toLowerCase() === "get";
+}
+
+const TRANSPORT_RETRY_DELAYS_MS = [600, 1800] as const;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 传输层失败是否值得自动重试（弱网抖动下提升成功率，且避免重复写） */
+function shouldRetryTransport(config: AxiosRequestConfig | undefined): boolean {
+  if (!config) return false;
+  if (config.retry === false) return false;
+  if (typeof config.retry === "number") return config.retry > 0;
+  // 默认只自动重试幂等读 / 显式 silent 轮询
+  return isGetMethod(config) || config.silent === true;
+}
+
+function nextRetryDelay(attempt: number): number {
+  return TRANSPORT_RETRY_DELAYS_MS[attempt] ?? 1800;
+}
+
+function maxTransportRetries(config?: AxiosRequestConfig): number {
+  if (!config) return 0;
+  if (config.retry === false) return 0;
+  if (typeof config.retry === "number") return config.retry;
+  return shouldRetryTransport(config) ? TRANSPORT_RETRY_DELAYS_MS.length : 0;
+}
+
+/** 传输层失败（超时/断网/连接被重置）——不弹红框，只静默失败 */
+function isTransportError(error: any): boolean {
+  return !error?.response;
+}
+
+/**
+ * 网络抖动属于常态，不要用红色 error 吓用户。
+ * 轮询类（GET / silent）完全静默；用户主动写操作最多给一次温和提示。
+ */
+function isOnLoginPage(): boolean {
+  return typeof window !== 'undefined' && window.location.hash.includes('login');
+}
+
+function notifyTransportFailure(config?: AxiosRequestConfig) {
+  if (!config || config.silent || isGetMethod(config)) return;
+  // 登录页保持安静，避免弱网时连环弹窗
+  if (isOnLoginPage()) return;
+  AMessage.warning("网络不稳定，请稍后重试").then(() => {});
+}
+
+function shouldNotifyBusinessError(config?: AxiosRequestConfig): boolean {
+  if (!config || config.silent) return false;
+  return !isGetMethod(config);
+}
 
 // 请求拦截器
 instance.interceptors.request.use(
@@ -64,7 +132,7 @@ instance.interceptors.request.use(
     ) {
       AMessage.warning('请勿重复操作').then(() => {})
       NProgress.done();
-      return Promise.reject("请勿重复操作");
+      return Promise.reject(new Error("请勿重复操作"));
     }
 
     return config;
@@ -90,47 +158,78 @@ instance.interceptors.response.use(
     if(code == 200) {
       return response;
     } else if (code == 202) {
-      AMessage.info(msg).then(() => {})
+      if (!response.config?.silent) {
+        AMessage.info(msg).then(() => {})
+      }
       return response;
     } else if(code === 401) {
-      AMessage.warning('登录状态已失效，请重新登录').then(() => {})
+      // 未登录/过期是常态跳转，避免突兀弹窗打断登录页
+      if (!isOnLoginPage()) {
+        AMessage.warning('登录状态已失效，请重新登录').then(() => {})
+      }
       window.location.href = APP_LOGIN_URL;
       window.location.reload();
-      return Promise.reject(msg);
+      return Promise.reject(new Error(msg));
     } else {
-      AMessage.error(msg).then(() => {})
-      return Promise.reject(msg);
+      // 业务拒绝（如「尚未开启查分」/「用户名或密码错误」）不是系统崩溃：
+      // GET/轮询静默；写操作用温和提示；登录页只提示账号结果，不刷屏
+      if (shouldNotifyBusinessError(response.config) || isOnLoginPage()) {
+        if (isOnLoginPage() && isGetMethod(response.config)) return Promise.reject(new Error(msg));
+        AMessage.warning(msg).then(() => {})
+      }
+      return Promise.reject(new Error(msg));
     }
   },
   async (error) => {
     const originalRequest = error.config;
-    // 1. 非401错误直接抛出
+    // 1. 非401：传输层失败静默，避免 timeout of xxxms / Network Error 红刷屏
     if (!error.response || error.response.status !== 401) {
       NProgress.done();
-      AMessage.error(error.message || '未知错误').then(() => {})
-      return Promise.reject(error);
+      if (isTransportError(error)) {
+        // 弱网抖动：对读请求自动退避重试，真正失败再交给调用方
+        const alreadyRetried = Number((originalRequest as any)?._transportRetryCount || 0);
+        const maxRetry = maxTransportRetries(originalRequest);
+        if (originalRequest && alreadyRetried < maxRetry) {
+          (originalRequest as any)._transportRetryCount = alreadyRetried + 1;
+          await sleep(nextRetryDelay(alreadyRetried));
+          return instance(originalRequest);
+        }
+        notifyTransportFailure(originalRequest);
+        const friendly = new Error("网络连接不稳定，请稍后重试");
+        (friendly as any).isTransportError = true;
+        return Promise.reject(friendly);
+      }
+      // HTTP 非 2xx 但有响应体：也别甩英文 axios 原文
+      const status = error.response?.status;
+      const bodyMsg = error.response?.data?.msg;
+      const text = bodyMsg || (status ? `请求失败（${status}）` : "请求失败");
+      if (shouldNotifyBusinessError(originalRequest)) {
+        AMessage.warning(text).then(() => {})
+      }
+      return Promise.reject(new Error(text));
     }
 
-    // 2. 如果是刷新令牌接口本身返回401，直接清理令牌并跳转登录
-    if (originalRequest.headers[setting.refreshTokenRequest] || originalRequest.url.includes('/api/auth/refresh-token')) {
+    const quietLoginRedirect = (tip: string) => {
       removeToken();
       removeRefreshToken();
       requestsQueue = [];
-      AMessage.warning('刷新令牌失败，请重新登录').then(() => {})
+      if (!isOnLoginPage()) {
+        AMessage.warning(tip).then(() => {})
+      }
       window.location.href = APP_LOGIN_URL;
       window.location.reload();
-      return Promise.reject('刷新令牌失败');
+    };
+
+    // 2. 如果是刷新令牌接口本身返回401，直接清理令牌并跳转登录
+    if (originalRequest.headers[setting.refreshTokenRequest] || originalRequest.url.includes('/api/auth/refresh-token')) {
+      quietLoginRedirect('登录状态已失效，请重新登录');
+      return Promise.reject(new Error('刷新令牌失败'));
     }
 
     // 3. 防止重复重试
     if (originalRequest.headers._retry) {
-      removeToken();
-      removeRefreshToken();
-      requestsQueue = [];
-      AMessage.warning('登录状态已失效，请重新登录').then(() => {})
-      window.location.href = APP_LOGIN_URL;
-      window.location.reload();
-      return Promise.reject('令牌重试失败');
+      quietLoginRedirect('登录状态已失效，请重新登录');
+      return Promise.reject(new Error('令牌重试失败'));
     }
 
     originalRequest.headers._retry = true;
@@ -141,14 +240,9 @@ instance.interceptors.response.use(
       const refreshToken = getRefreshToken();
 
       if (!refreshToken) {
-        removeToken();
-        removeRefreshToken();
-        requestsQueue = [];
-        AMessage.warning('无刷新令牌，请重新登录').then(() => {})
-        window.location.href = APP_LOGIN_URL;
-        window.location.reload();
         isRefreshing = false;
-        return Promise.reject('无刷新令牌');
+        quietLoginRedirect('登录状态已失效，请重新登录');
+        return Promise.reject(new Error('无刷新令牌'));
       }
 
       try {
@@ -180,14 +274,8 @@ instance.interceptors.response.use(
         return instance(originalRequest);
       } catch (err) {
         // 刷新令牌失败，清理所有状态
-        removeToken();
-        removeRefreshToken();
-        requestsQueue = [];
         isRefreshing = false;
-
-        AMessage.warning('登录已过期，请重新登录').then(() => {})
-        window.location.href = APP_LOGIN_URL;
-        window.location.reload();
+        quietLoginRedirect('登录状态已失效，请重新登录');
         return Promise.reject(err);
       }
     } else {

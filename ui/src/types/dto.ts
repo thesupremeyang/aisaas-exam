@@ -26,6 +26,8 @@ export interface AgentDefinitionDTO extends PageParams {
   agentCode?: string
   enabled?: boolean
   tag?: string
+  /** 平台管理员查看指定租户的智能体（仅平台管理员生效，答卷管理→考生配置界面用） */
+  viewTenantId?: string | number
 }
 
 /**

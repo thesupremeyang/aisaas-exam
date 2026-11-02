@@ -127,11 +127,11 @@ async function handleTest(id: string) {
     if (result.success) {
       message.success('连接测试成功')
     } else {
-      message.error(`连接测试失败: ${result.message || '未知错误'}`)
+      message.warning(`连接测试失败: ${result.message || '未知错误'}`)
     }
     fetchModelList()
   } catch {
-    message.error('连接测试请求失败')
+    message.warning('连接测试请求失败')
   }
 }
 

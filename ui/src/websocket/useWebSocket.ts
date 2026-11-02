@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useAccountStore } from '@/stores'
 import { WS_CONFIG, type WSMessageType } from './const/websocket';
 import { ConnectionManager } from './manager/connection-manager';
@@ -13,12 +13,15 @@ export function useWebSocket() {
   const isConnecting = ref(false);
   const error = ref<Error | null>(null);
   const messageHandler = ref<EnhancedMessageHandler | null>(null);
+  /** 重连已彻底停止（超过次数/时间窗口），需用户手动重试或刷新页面 */
+  const gaveUp = ref(false);
 
   // 通过 callbacks 统一管理所有 socket 事件，避免外部覆盖 socket 上的事件监听
   const connectionManager = new ConnectionManager({
     onStateChange: (state) => {
       isConnected.value = state.isConnected;
       isConnecting.value = state.isConnecting;
+      gaveUp.value = state.gaveUp;
       eventBus.emit('WEBSOCKET:CONNECTION_STATE', state);
     },
     onMessage: (event) => {
@@ -48,9 +51,8 @@ export function useWebSocket() {
       messageHandler.value = null;
       eventBus.emit('WEBSOCKET:DISCONNECTED', { timestamp: Date.now() });
 
-      if (connectionManager.shouldReconnect()) {
-        reconnectionManager.scheduleReconnect();
-      }
+      // 收敛判断（是否还该重连、是否已放弃）统一在 scheduleReconnect 内部处理
+      reconnectionManager.scheduleReconnect();
     },
   });
 
@@ -58,6 +60,10 @@ export function useWebSocket() {
     connectionManager,
     async () => {
       await initWS();
+    },
+    () => {
+      gaveUp.value = true;
+      eventBus.emit('WEBSOCKET:GIVE_UP', { timestamp: Date.now() });
     }
   );
 
@@ -72,8 +78,8 @@ export function useWebSocket() {
     try {
       error.value = null;
 
-      // connect() 内部已统一绑定 onopen/onerror/onclose/onmessage，无需外部重复绑定
-      const socket = await connectionManager.connect(WS_CONFIG.URL);
+      // 浏览器 WebSocket 无法自定义请求头，服务端 HandshakeInterceptor 从 query 的 token 参数取凭证
+      const socket = await connectionManager.connect(buildWSUrl());
 
       // 初始化增强消息处理器（仅持有 socket 引用用于发送消息）
       messageHandler.value = new EnhancedMessageHandler(socket, {
@@ -96,11 +102,30 @@ export function useWebSocket() {
         error: err
       });
 
-      // 连接失败时尝试重连（shouldReconnect 内已判断 manualDisconnect）
-      if (connectionManager.shouldReconnect()) {
-        reconnectionManager.scheduleReconnect();
-      }
+      // 连接失败时尝试重连（是否继续、是否放弃由 scheduleReconnect 统一判断）
+      reconnectionManager.scheduleReconnect();
     }
+  };
+
+  /** 握手 URL：附加 accessToken 查询参数（服务端 TokenUtils 从 query 的 accessToken 取值） */
+  const buildWSUrl = () => {
+    const token = accountStore.accessToken;
+    if (!token) return WS_CONFIG.URL;
+    return `${WS_CONFIG.URL}${WS_CONFIG.URL.includes('?') ? '&' : '?'}accessToken=${encodeURIComponent(token)}`;
+  };
+
+  /** 用户手动重试：完整重置重连状态后再发起一次连接 */
+  const retryWS = async () => {
+    gaveUp.value = false;
+    connectionManager.resetReconnectState();
+    await initWS();
+  };
+
+  // 页面回到前台时立即重试一次，不必等当前退避计时器走完
+  const handleVisibilityChange = () => {
+    if (document.visibilityState !== 'visible') return;
+    if (connectionManager.isConnected() || connectionManager.isManualDisconnect()) return;
+    reconnectionManager.scheduleReconnect();
   };
 
   const disconnectWS = () => {
@@ -123,7 +148,12 @@ export function useWebSocket() {
     return messageHandler.value?.sendMessage(type, payload) ?? false;
   };
 
+  onMounted(() => {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  });
+
   onUnmounted(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     disconnectWS();
   });
 
@@ -131,8 +161,10 @@ export function useWebSocket() {
     isConnected,
     isConnecting,
     error,
+    gaveUp,
     messageHandler,
     initWS,
+    retryWS,
     disconnectWS,
     sendMessage,
   };

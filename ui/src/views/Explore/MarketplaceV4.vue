@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
-  BellOutlined,
   DownOutlined,
   CloseOutlined,
   LoadingOutlined,
@@ -114,7 +113,6 @@ function onKeydown(event: KeyboardEvent) {
         <div class="v4-top-actions">
           <label><SearchOutlined /><input v-model="query" placeholder="搜索智能体名称或能力" /></label>
           <a class="v4-mine" href="http://localhost:3030/web/#/agent">我的智能体</a>
-          <button type="button" class="v4-icon" aria-label="通知"><BellOutlined /></button>
           <span class="v4-avatar">A</span>
         </div>
       </header>

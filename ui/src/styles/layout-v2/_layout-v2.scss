@@ -201,6 +201,30 @@ $layout-header-height: 64px !default;
   @media (max-width: $breakpoint-md) {
     display: block;
   }
+
+  /* 抽屉内用完整列布局，避免 Logo height:100% 把菜单挤到底部 */
+  .layout-v2-drawer-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .sider-v2-logo {
+    height: $layout-header-height;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  }
+
+  .sider-v2-menu {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .sider-v2-toolbar {
+    flex-shrink: 0;
+  }
 }
 
 /* ===================== 路由切换动画 ===================== */

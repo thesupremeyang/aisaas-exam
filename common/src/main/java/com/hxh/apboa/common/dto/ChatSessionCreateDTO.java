@@ -13,9 +13,9 @@ import lombok.Setter;
 @Setter
 public class ChatSessionCreateDTO implements SerializableEnable {
     /**
-     * 智能体ID
+     * 智能体 key：数字 id 或 agentCode，服务端解析后落库为数字 id
      */
-    private Long agentId;
+    private String agentId;
     /**
      * 会话标题，可选
      */

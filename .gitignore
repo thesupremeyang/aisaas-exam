@@ -63,3 +63,6 @@ runner-*/src/main/resources/application-exam-local.yml
 .trellis/
 .workbuddy/
 $null
+
+# Load test artifacts
+scripts/loadtest/artifacts/

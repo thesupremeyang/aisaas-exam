@@ -43,6 +43,7 @@ function requestAssessment() {
 .exam-portal-layout {
   min-height: 100vh;
   width: 100%;
+  overflow-x: hidden;
   background: #f5f7fb;
 }
 </style>

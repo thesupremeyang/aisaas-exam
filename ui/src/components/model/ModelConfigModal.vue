@@ -213,7 +213,7 @@ async function handleTest(id: string) {
     // if (res.data.data.success) {
     //   message.success('测试成功')
     // } else {
-    //   message.error(res.data.data.message)
+    //   message.warning(res.data.data.message)
     // }
     // 重新加载列表以获取服务端持久化的最新状态
     await fetchModelList()

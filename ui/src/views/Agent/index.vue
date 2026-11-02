@@ -9,7 +9,7 @@ import { onMounted, ref, computed, h, watch } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import { useRoute, useRouter } from 'vue-router'
 import {RobotOutlined, SearchOutlined} from '@ant-design/icons-vue'
-import { useAgentStore } from '@/stores'
+import { useAgentStore, useAccountStore } from '@/stores'
 import { storeToRefs } from 'pinia'
 import * as agentApi from '@/api/agent'
 import * as agentA2aApi from '@/api/agentA2a'
@@ -25,6 +25,7 @@ import {ApboaModalApi} from "@/components/common/ApboaModalApi.ts";
 import ApboaInfiniteLoading from '@/components/common/ApboaInfiniteLoading.vue'
 
 const store = useAgentStore()
+const accountStore = useAccountStore()
 const route = useRoute()
 const router = useRouter()
 const { list, tags, selectedAgentType, selectedTag, keyword, loading, hasMore } = storeToRefs(store)
@@ -414,7 +415,7 @@ async function consumeExamHandoff() {
     }
     await router.replace({ path: '/agent' })
   } catch {
-    message.error('考试身份校验失败，请返回考试门户后重试')
+    message.warning('考试身份校验失败，请返回考试门户后重试')
     await router.replace({ path: '/exam/portal' })
   }
 }

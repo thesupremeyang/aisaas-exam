@@ -44,4 +44,9 @@ public class Account extends BaseEntity {
      * 记住上次登录
      */
     private Boolean rememberLastTenant;
+
+    /**
+     * 是否平台管理员（可访问全部租户数据与平台管理功能）
+     */
+    private Boolean platformAdmin;
 }

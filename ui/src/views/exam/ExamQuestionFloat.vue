@@ -11,6 +11,7 @@ import { message } from 'ant-design-vue'
 import { listCandidateQuestions, type ExamQuestion } from '@/api/exam'
 import { download as downloadAttach } from '@/api/attach'
 import { useAccountStore } from '@/stores'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
 
 const accountStore = useAccountStore()
 
@@ -34,7 +35,7 @@ const isExamCandidate = computed(() => {
     !!campaignId.value &&
     !!currentAccount &&
     candidateAccount.value === String(currentAccount) &&
-    accountStore.userInfo?.username?.toLowerCase() !== 'admin'
+    !isPlatformAdminUsername(accountStore.userInfo?.username)
   )
 })
 
@@ -119,7 +120,7 @@ async function downloadAttachment(question: ExamQuestion) {
     anchor.click()
     window.URL.revokeObjectURL(url)
   } catch {
-    message.error('附件下载失败，请稍后重试')
+    message.warning('附件下载失败，请稍后重试')
   }
 }
 
@@ -291,8 +292,9 @@ onBeforeUnmount(() => {
 .exam-question-float {
   position: fixed;
   z-index: 1101;
-  top: 80px;
+  top: auto;
   right: 24px;
+  bottom: calc(var(--exam-question-bottom-gap, 20px) + env(safe-area-inset-bottom, 0px));
 }
 
 .exam-question-trigger,
@@ -366,12 +368,14 @@ onBeforeUnmount(() => {
 
 .exam-question-panel {
   position: absolute;
-  top: calc(100% + 10px);
+  top: auto;
+  bottom: calc(100% + 10px);
   right: 0;
   display: flex;
   flex-direction: column;
   width: min(430px, calc(100vw - 32px));
   max-height: min(700px, calc(100vh - 108px));
+  max-height: min(700px, calc(100dvh - var(--exam-question-bottom-gap, 20px) - 70px - env(safe-area-inset-bottom, 0px)));
   overflow: hidden;
   border: 1px solid rgba(191, 219, 254, 0.9);
   border-radius: 18px;
@@ -383,8 +387,8 @@ onBeforeUnmount(() => {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(-8px) scale(0.98);
-  transform-origin: top right;
+  transform: translateY(8px) scale(0.98);
+  transform-origin: bottom right;
   transition:
     transform 200ms cubic-bezier(0.23, 1, 0.32, 1),
     opacity 160ms ease,
@@ -678,7 +682,8 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .exam-question-float {
-    top: 72px;
+    --exam-question-bottom-gap: 12px;
+    top: auto;
     right: 12px;
   }
 
@@ -695,7 +700,8 @@ onBeforeUnmount(() => {
 
   .exam-question-panel {
     width: min(430px, calc(100vw - 24px));
-    max-height: calc(100vh - 94px);
+    max-height: calc(100vh - 82px);
+    max-height: calc(100dvh - var(--exam-question-bottom-gap, 12px) - 70px - env(safe-area-inset-bottom, 0px));
     border-radius: 15px;
   }
 }
@@ -714,5 +720,16 @@ onBeforeUnmount(() => {
   .exam-question-panel {
     transform: none;
   }
+}
+</style>
+
+<style lang="scss">
+body:has(.exam-question-float) .ant-dropdown-menu:has(> .ant-dropdown-menu-item[data-menu-id='logout']) > .ant-dropdown-menu-item[data-menu-id='profile'],
+body:has(.exam-question-float) .ant-dropdown-menu:has(> .ant-dropdown-menu-item[data-menu-id='logout']) > .ant-dropdown-menu-item[data-menu-id='profile'] + .ant-dropdown-menu-item-divider {
+  display: none !important;
+}
+
+body:has(.apboa-modal-wrap:not([style*='display: none'])) .exam-question-float {
+  --exam-question-bottom-gap: 76px;
 }
 </style>

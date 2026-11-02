@@ -59,16 +59,17 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
         if (userId == null || userId == 0L) {
             throw new RuntimeException("用户未登录");
         }
-        if (dto.getAgentId() == null ) {
-            throw new RuntimeException("agentId 不能为空");
+        Long agentId = agentDefinitionService.resolveAgentId(dto.getAgentId());
+        if (agentId == null) {
+            throw new RuntimeException("智能体不存在或已禁用");
         }
 
         // 校验智能体的合法性
-        AgentDefinition agentDefinition = CreatorAgentConst.AGENT_ID == dto.getAgentId()
-                ? systemAgentMapper.selectByIdIgnoreTenant(dto.getAgentId())
+        AgentDefinition agentDefinition = CreatorAgentConst.AGENT_ID == agentId
+                ? systemAgentMapper.selectByIdIgnoreTenant(agentId)
                 : agentDefinitionService.getOne(
                         new LambdaQueryWrapper<AgentDefinition>()
-                                .eq(AgentDefinition::getId, dto.getAgentId())
+                                .eq(AgentDefinition::getId, agentId)
                                 .eq(AgentDefinition::getEnabled, true),
                         false);
 
@@ -78,7 +79,7 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
 
         ChatSession session = new ChatSession();
         session.setUserId(userId);
-        session.setAgentId(dto.getAgentId());
+        session.setAgentId(agentId);
         session.setTitle(dto.getTitle() != null ? dto.getTitle() : "新对话");
 
         save(session);
@@ -230,9 +231,10 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
     @Override
     public List<ChatSessionVO> listSessions(ChatSessionQueryDTO query) {
         Long userId = UserUtils.getId();
+        Long agentId = resolveAgentIdStrict(query.getAgentId());
         return lambdaQuery()
                 .eq(userId != null, ChatSession::getUserId, userId)
-                .eq(query.getAgentId() != null, ChatSession::getAgentId, query.getAgentId())
+                .eq(agentId != null, ChatSession::getAgentId, agentId)
                 .orderByDesc(ChatSession::getIsPinned)
                 .orderByDesc(ChatSession::getUpdatedAt)
                 .list()
@@ -244,13 +246,26 @@ public class ChatSessionServiceImpl extends ServiceImpl<ChatSessionMapper, ChatS
     @Override
     public IPage<ChatSessionVO> pageSessions(PageParams pageParams, ChatSessionQueryDTO query) {
         Long userId = UserUtils.getId();
+        Long agentId = resolveAgentIdStrict(query.getAgentId());
         LambdaQueryWrapper<ChatSession> wrapper = new LambdaQueryWrapper<ChatSession>()
                 .eq(userId != null, ChatSession::getUserId, userId)
-                .eq(query.getAgentId() != null, ChatSession::getAgentId, query.getAgentId())
+                .eq(agentId != null, ChatSession::getAgentId, agentId)
                 .eq(query.getIsPinned() != null, ChatSession::getIsPinned, query.getIsPinned())
                 .orderByDesc(ChatSession::getUpdatedAt);
         IPage<ChatSession> page = page(MP.getPage(pageParams), wrapper);
         return BeanUtils.copyPage(page, ChatSessionVO.class);
+    }
+
+    /** 传了智能体 key 但解析不到时抛错，避免退化成不按智能体过滤的全量查询 */
+    private Long resolveAgentIdStrict(String agentKey) {
+        if (agentKey == null || agentKey.isBlank()) {
+            return null;
+        }
+        Long agentId = agentDefinitionService.resolveAgentId(agentKey);
+        if (agentId == null) {
+            throw new RuntimeException("智能体不存在或已禁用");
+        }
+        return agentId;
     }
 
     @Override

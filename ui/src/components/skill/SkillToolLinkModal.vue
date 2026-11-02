@@ -106,7 +106,7 @@ async function handleConfirm() {
     emit('update:visible', false)
     emit('success')
   } catch {
-    message.error('保存关联工具失败')
+    message.warning('保存关联工具失败')
   } finally {
     saving.value = false
   }

@@ -54,7 +54,7 @@ async function handleDownload(row: Attach) {
     window.URL.revokeObjectURL(url)
     message.success('下载成功')
   } catch {
-    message.error('下载失败')
+    message.warning('下载失败')
   }
 }
 

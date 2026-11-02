@@ -382,4 +382,91 @@ watch(
   gap: 8px;
   padding: 12px 0;
 }
+
+/* Mobile: keep the modal inside the visible viewport and leave actions reachable. */
+@media (max-width: 768px), (max-width: 1023px) and (max-height: 500px) {
+  .apboa-modal-wrap .ant-modal {
+    top: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+  }
+
+  .apboa-modal-wrap .ant-modal .ant-modal-content {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .apboa-modal-wrap .ant-modal .ant-modal-body {
+    min-height: 0;
+  }
+
+  .apboa-fullscreen {
+    display: block;
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+  }
+
+  .apboa-side {
+    display: none;
+  }
+
+  .apboa-center {
+    width: 100vw !important;
+    height: 100vh;
+    height: 100dvh;
+    padding: 0;
+    transition: none;
+  }
+
+  .apboa-center-header {
+    min-height: 52px;
+    height: auto;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .apboa-center-header-actions {
+    gap: 4px;
+  }
+
+  .apboa-center-header-actions > .apboa-icon-btn[title='扩展'],
+  .apboa-center-header-actions > .apboa-icon-btn[title='收缩'] {
+    display: none;
+  }
+
+  .apboa-center-header-actions > .apboa-icon-btn[title='关闭'] {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    color: #475569;
+    background: #f1f5f9;
+  }
+
+  .apboa-center-body {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .apboa-body-inner {
+    min-height: 100%;
+    justify-content: flex-start;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+
+  .apboa-center-footer {
+    position: relative;
+    z-index: 2;
+    flex-wrap: wrap;
+    padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid #e2e8f0;
+    background: #fff;
+  }
+}
 </style>

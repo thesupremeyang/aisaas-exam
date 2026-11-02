@@ -5,10 +5,11 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { AccountVO, TenantRole, TenantInfo, SelectTenantRequest, PendingApprovalInfo } from '@/types'
 import * as authApi from '@/api/auth'
 import * as accountApi from '@/api/account'
+import { registerPlatformAdminUsername } from '@/utils/platformAdmin'
 import type {
   LoginRequest,
   LoginResponse,
@@ -46,6 +47,18 @@ export const useAccountStore = defineStore('account', () => {
 
   /** 登录状态 */
   const isLoggedIn = computed(() => !!accessToken.value && !!userInfo.value)
+
+  // 账号表标记的平台管理员：登录/恢复会话后同步进 platformAdmin 集合，
+  // 使 isPlatformAdminUsername 的全部调用点（菜单、路由守卫、考试页面）即时生效。
+  watch(
+    userInfo,
+    (user) => {
+      if (user?.platformAdmin) {
+        registerPlatformAdminUsername(user.username)
+      }
+    },
+    { immediate: true },
+  )
 
   // ========== 租户 State ==========
 
@@ -216,6 +229,10 @@ export const useAccountStore = defineStore('account', () => {
 
       // 无需选择租户：直接完成登录
       needSelectTenant.value = false
+      // 新登录清除可能残留的"查看考生配置"模拟态（防止上次会话的模拟令牌/横幅串场）
+      sessionStorage.removeItem(ADMIN_VIEW_ACTIVE_KEY)
+      sessionStorage.removeItem(ADMIN_VIEW_BACKUP_KEY)
+      adminViewCandidate.value = null
       await refreshLogin(data)
       return { needSelectTenant: false, tenants, blocked: false, pendingApprovals: [] }
     } catch (error) {
@@ -293,6 +310,82 @@ export const useAccountStore = defineStore('account', () => {
       throw error
     }
   }
+
+  // ========== 管理员"进入考生配置界面"模拟态 ==========
+  const ADMIN_VIEW_BACKUP_KEY = 'admin-view-backup'
+  const ADMIN_VIEW_ACTIVE_KEY = 'admin-view-active'
+
+  /** 模拟态激活时为考生姓名（用于界面提示条） */
+  const adminViewCandidate = ref<string | null>(sessionStorage.getItem(ADMIN_VIEW_ACTIVE_KEY))
+
+  /**
+   * 进入考生配置界面：备份管理员登录态 → 换发"考生租户上下文"的模拟令牌。
+   * 模拟态下所有页面（智能体/Skill/知识库/提示词/工具等）只显示该考生租户的内容。
+   * 已处于模拟态时直接返回（防快速双击把备份覆盖成模拟令牌）。
+   */
+  async function enterTenantView(tenantId: string | number, candidateName: string): Promise<void> {
+    if (adminViewCandidate.value != null) return
+    const backup = {
+      accessToken: accessToken.value,
+      refreshToken: refreshToken.value,
+      userInfo: userInfo.value,
+      currentTenant: currentTenant.value,
+      availableTenants: availableTenants.value,
+    }
+    try {
+      const response = await authApi.adminViewTenant(tenantId)
+      const loginData = response.data.data
+      sessionStorage.setItem(ADMIN_VIEW_BACKUP_KEY, JSON.stringify(backup))
+      sessionStorage.setItem(ADMIN_VIEW_ACTIVE_KEY, candidateName)
+      adminViewCandidate.value = candidateName
+      setAccessInfo(loginData)
+      if (loginData.userDetail) {
+        userInfo.value = loginData.userDetail as unknown as AccountVO
+        setUser(userInfo.value)
+      }
+    } catch (error) {
+      // 进入失败：清掉已写入的备份，保持管理员态干净
+      sessionStorage.removeItem(ADMIN_VIEW_BACKUP_KEY)
+      sessionStorage.removeItem(ADMIN_VIEW_ACTIVE_KEY)
+      throw error
+    }
+  }
+
+  /**
+   * 退出考生配置界面：恢复管理员登录态并清除模拟标记。
+   */
+  function exitTenantView(): void {
+    const raw = sessionStorage.getItem(ADMIN_VIEW_BACKUP_KEY)
+    if (raw) {
+      try {
+        const backup = JSON.parse(raw)
+        accessToken.value = backup.accessToken || ''
+        refreshToken.value = backup.refreshToken || ''
+        userInfo.value = backup.userInfo || null
+        currentTenant.value = backup.currentTenant || null
+        availableTenants.value = backup.availableTenants || []
+        if (backup.accessToken) {
+          // 备份原始 TTL 不可得，按 8 小时兜底；令牌刷新机制会自动续期
+          const ttl = String(Date.now() + 8 * 3600 * 1000)
+          setToken({ value: backup.accessToken, ttl })
+          setRefreshToken({ value: backup.refreshToken || '', ttl })
+        }
+        if (backup.userInfo) {
+          setUser(backup.userInfo)
+        }
+        cache.local.setJSON(TENANT_KEY, backup.currentTenant || {})
+        cache.local.setJSON(TENANTS_KEY, backup.availableTenants || [])
+      } catch (error) {
+        console.error('恢复管理员登录态失败:', error)
+      }
+    }
+    sessionStorage.removeItem(ADMIN_VIEW_BACKUP_KEY)
+    sessionStorage.removeItem(ADMIN_VIEW_ACTIVE_KEY)
+    adminViewCandidate.value = null
+  }
+
+  /** 当前页签是否处于"查看考生配置"模拟态（响应式：侧栏/横幅随退出立即切换） */
+  const isTenantViewActive = computed(() => adminViewCandidate.value != null)
 
   /**
    * 用户退出
@@ -478,6 +571,10 @@ export const useAccountStore = defineStore('account', () => {
     logout,
     changePassword,
     updateProfile,
+    adminViewCandidate,
+    enterTenantView,
+    exitTenantView,
+    isTenantViewActive,
     fetchAccountDetail,
     fetchCurrentUserInfo,
     setUserInfo,

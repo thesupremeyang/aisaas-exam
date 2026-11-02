@@ -56,13 +56,16 @@ const reviewerPath = (submissionId: string) =>
   `/api/exam/reviewer/submissions/${submissionId}/review`
 
 export function getCandidateSubmission(submissionId: string) {
-  return request.get<ApiResponse<ExamSubmission>>(candidatePath(submissionId))
+  return request.get<ApiResponse<ExamSubmission>>(candidatePath(submissionId), {
+    silent: true,
+    retry: 2,
+  })
 }
 
 /** 查分模式：获取本人已提交作品关联的智能体配置，只读。 */
 export function getCandidateAgentConfiguration(submissionId: string) {
   return request.get<ApiResponse<AgentDefinitionVO>>(`${candidatePath(submissionId)}/agent-config`, {
-    timeout: 10000,
+    timeout: 30000,
   })
 }
 
@@ -70,7 +73,7 @@ export function getCandidateAgentConfiguration(submissionId: string) {
 export function listSubmissions(enrollmentId: string | number) {
   return request.get<ApiResponse<ExamSubmission[]>>(
     `/api/exam/candidate/submissions/enrollments/${enrollmentId}/submissions`,
-    { timeout: 10000 },
+    { timeout: 30000, silent: true, retry: 2 },
   )
 }
 
@@ -79,7 +82,7 @@ export function createSubmission(enrollmentId: string | number, questionId?: str
   return request.post<ApiResponse<ExamSubmission>>(
     `/api/exam/candidate/submissions/enrollments/${enrollmentId}/submissions`,
     questionId ? { questionId } : {},
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
@@ -89,7 +92,10 @@ export function deleteSubmission(submissionId: string | number) {
 }
 
 export function saveCandidateDraft(submissionId: string, payload: ExamSubmission) {
-  return request.put<ApiResponse<boolean>>(`${candidatePath(submissionId)}/draft`, payload)
+  // 草稿保存幂等，弱网可安全重试 1 次
+  return request.put<ApiResponse<boolean>>(`${candidatePath(submissionId)}/draft`, payload, {
+    retry: 1,
+  })
 }
 
 export function submitCandidateWork(submissionId: string) {
@@ -102,12 +108,15 @@ export function retryCandidateAssessment(submissionId: string) {
 }
 
 export function getAssessmentTask(submissionId: string) {
-  return request.get<ApiResponse<AssessmentTask>>(`${candidatePath(submissionId)}/assessment-task`)
+  return request.get<ApiResponse<AssessmentTask>>(`${candidatePath(submissionId)}/assessment-task`, {
+    silent: true,
+  })
 }
 
 export function getAssessmentReport(submissionId: string) {
   return request.get<ApiResponse<AssessmentReport>>(
     `${candidatePath(submissionId)}/assessment-report`,
+    { silent: true },
   )
 }
 
@@ -203,6 +212,8 @@ export interface ExamCandidateStatus {
   accountId?: string | number
   candidateName?: string
   username?: string
+  email?: string
+  accountEnabled?: boolean
   organization?: string
   loggedIn?: boolean
   entered?: boolean
@@ -254,14 +265,16 @@ export interface ExamCandidateQuestionScore {
 
 export function listActiveCampaigns() {
   return request.get<ApiResponse<ExamCampaign[]>>(`${candidatePortalPath}/campaigns/active`, {
-    timeout: 10000,
+    timeout: 30000,
+    silent: true,
   })
 }
 
 export function getCandidateProgress(campaignId: string | number) {
   return request.get<ApiResponse<CandidateProgress>>(`${candidatePortalPath}/progress`, {
     params: { campaignId },
-    timeout: 10000,
+    timeout: 30000,
+    silent: true,
   })
 }
 
@@ -269,7 +282,8 @@ export function getCandidateProgress(campaignId: string | number) {
 export function getCandidateScore(campaignId: string | number) {
   return request.get<ApiResponse<ExamCandidateScore>>(`${candidatePortalPath}/score`, {
     params: { campaignId },
-    timeout: 10000,
+    timeout: 30000,
+    silent: true,
   })
 }
 
@@ -277,7 +291,8 @@ export function getCandidateScore(campaignId: string | number) {
 export function listCandidateQuestions(campaignId: string | number) {
   return request.get<ApiResponse<ExamQuestion[]>>(`${candidatePortalPath}/questions`, {
     params: { campaignId },
-    timeout: 10000,
+    timeout: 30000,
+    silent: true,
   })
 }
 
@@ -286,7 +301,7 @@ export function getExamCandidateModelConfig(campaignId: string | number) {
     `${candidatePortalPath}/model-config`,
     {
       params: { campaignId },
-      timeout: 10000,
+      timeout: 30000,
     },
   )
 }
@@ -300,7 +315,7 @@ export function saveExamCandidateModelConfig(
     payload,
     {
       params: { campaignId },
-      timeout: 20000,
+      timeout: 30000,
     },
   )
 }
@@ -314,7 +329,7 @@ export function listExamCandidateAvailableModels(
     payload,
     {
       params: { campaignId },
-      timeout: 20000,
+      timeout: 30000,
     },
   )
 }
@@ -322,7 +337,159 @@ export function listExamCandidateAvailableModels(
 export function getExamCandidateStatus(campaignId: string | number) {
   return request.get<ApiResponse<ExamCandidateStatusSnapshot>>(
     `/api/exam/admin/campaigns/${campaignId}/candidates/status`,
-    { timeout: 10000 },
+    { timeout: 30000, silent: true },
+  )
+}
+
+export interface ExamCandidateAccountCreateRequest {
+  nickname: string
+  username: string
+  email?: string
+  password: string
+  organization?: string
+}
+
+export interface ExamCandidateAccountUpdateRequest {
+  nickname: string
+  username: string
+  email?: string
+  organization?: string
+}
+
+const examCandidateAdminPath = (campaignId: string | number) =>
+  `/api/exam/admin/campaigns/${campaignId}/candidates`
+
+export function createExamCandidateAccount(
+  campaignId: string | number,
+  payload: ExamCandidateAccountCreateRequest,
+) {
+  return request.post<ApiResponse<string | number>>(examCandidateAdminPath(campaignId), payload, {
+    timeout: 30000,
+  })
+}
+
+export function updateExamCandidateAccount(
+  campaignId: string | number,
+  enrollmentId: string | number,
+  payload: ExamCandidateAccountUpdateRequest,
+) {
+  return request.put<ApiResponse<boolean>>(
+    `${examCandidateAdminPath(campaignId)}/${enrollmentId}`,
+    payload,
+    { timeout: 30000 },
+  )
+}
+
+export function changeExamCandidatePassword(
+  campaignId: string | number,
+  enrollmentId: string | number,
+  password: string,
+) {
+  return request.put<ApiResponse<boolean>>(
+    `${examCandidateAdminPath(campaignId)}/${enrollmentId}/password`,
+    { password },
+    { timeout: 30000 },
+  )
+}
+
+export function resetExamCandidatePassword(
+  campaignId: string | number,
+  enrollmentId: string | number,
+) {
+  return request.post<ApiResponse<boolean>>(
+    `${examCandidateAdminPath(campaignId)}/${enrollmentId}/reset-password`,
+    null,
+    { timeout: 30000 },
+  )
+}
+
+export function updateExamCandidateAccountEnabled(
+  campaignId: string | number,
+  enrollmentId: string | number,
+  enabled: boolean,
+) {
+  return request.patch<ApiResponse<boolean>>(
+    `${examCandidateAdminPath(campaignId)}/${enrollmentId}/enabled`,
+    null,
+    { params: { enabled }, timeout: 30000 },
+  )
+}
+
+export function removeExamCandidateAccount(
+  campaignId: string | number,
+  enrollmentId: string | number,
+) {
+  return request.delete<ApiResponse<boolean>>(
+    `${examCandidateAdminPath(campaignId)}/${enrollmentId}`,
+    { timeout: 30000 },
+  )
+}
+
+export function batchResetExamCandidatePasswords(
+  campaignId: string | number,
+  enrollmentIds: Array<string | number>,
+) {
+  return request.post<ApiResponse<number>>(
+    `${examCandidateAdminPath(campaignId)}/batch-reset-password`,
+    { enrollmentIds },
+    { timeout: 30000 },
+  )
+}
+
+export function batchUpdateExamCandidateAccountsEnabled(
+  campaignId: string | number,
+  enrollmentIds: Array<string | number>,
+  enabled: boolean,
+) {
+  return request.patch<ApiResponse<number>>(
+    `${examCandidateAdminPath(campaignId)}/batch-enabled`,
+    { enrollmentIds, enabled },
+    { timeout: 30000 },
+  )
+}
+
+export function batchRemoveExamCandidateAccounts(
+  campaignId: string | number,
+  enrollmentIds: Array<string | number>,
+) {
+  return request.post<ApiResponse<number>>(
+    `${examCandidateAdminPath(campaignId)}/batch-remove`,
+    { enrollmentIds },
+    { timeout: 30000 },
+  )
+}
+
+export interface ExamCandidateImportOutcome {
+  rowNumber: number
+  name?: string
+  username?: string
+  success: boolean
+  errorMessage?: string
+}
+
+export interface ExamCandidateImportResult {
+  totalRows: number
+  successCount: number
+  failureCount: number
+  outcomes: ExamCandidateImportOutcome[]
+}
+
+/** 下载考生批量导入 Excel 模板（blob）。 */
+export function downloadCandidateImportTemplate(campaignId: string | number) {
+  return request.get(`${examCandidateAdminPath(campaignId)}/import-template`, {
+    responseType: 'blob',
+    timeout: 30000,
+  })
+}
+
+/** 上传 Excel 名单批量创建考生，逐行返回导入结果。 */
+export function importExamCandidates(campaignId: string | number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post<ApiResponse<ExamCandidateImportResult>>(
+    `${examCandidateAdminPath(campaignId)}/import`,
+    formData,
+    { timeout: 600000 },
   )
 }
 
@@ -338,7 +505,7 @@ export interface ExamCampaignUpdateRequest extends ExamCampaignScheduleRequest {
 
 export function listExamCampaignsForAdmin() {
   return request.get<ApiResponse<ExamCampaign[]>>('/api/exam/admin/campaigns', {
-    timeout: 10000,
+    timeout: 30000,
   })
 }
 
@@ -349,13 +516,13 @@ export function updateExamCampaignSchedule(
   return request.put<ApiResponse<ExamCampaign>>(
     `/api/exam/admin/campaigns/${campaignId}/schedule`,
     payload,
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
 export function createExamCampaign(payload: ExamCampaignUpdateRequest) {
   return request.post<ApiResponse<ExamCampaign>>('/api/exam/admin/campaigns', payload, {
-    timeout: 10000,
+    timeout: 30000,
   })
 }
 
@@ -366,7 +533,7 @@ export function updateExamCampaign(
   return request.put<ApiResponse<ExamCampaign>>(
     `/api/exam/admin/campaigns/${campaignId}`,
     payload,
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
@@ -374,7 +541,7 @@ export function updateExamCampaignEnabled(campaignId: string | number, enabled: 
   return request.patch<ApiResponse<ExamCampaign>>(
     `/api/exam/admin/campaigns/${campaignId}/enabled`,
     null,
-    { params: { enabled }, timeout: 10000 },
+    { params: { enabled }, timeout: 30000 },
   )
 }
 
@@ -382,7 +549,7 @@ export function updateExamCampaignScoreQuery(campaignId: string | number, enable
   return request.patch<ApiResponse<ExamCampaign>>(
     `/api/exam/admin/campaigns/${campaignId}/score-query`,
     null,
-    { params: { enabled }, timeout: 10000 },
+    { params: { enabled }, timeout: 30000 },
   )
 }
 
@@ -390,14 +557,14 @@ export function startExamNow(campaignId: string | number) {
   return request.post<ApiResponse<ExamCampaign>>(
     `/api/exam/admin/campaigns/${campaignId}/start-now`,
     null,
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
 export function listCandidateAgents(campaignId: string | number) {
   return request.get<ApiResponse<ExamAgentSummaryVO[]>>(`${candidatePortalPath}/agents`, {
     params: { campaignId },
-    timeout: 10000,
+    timeout: 30000,
   })
 }
 
@@ -409,7 +576,7 @@ export function issueSsoTicket(campaignId: string | number, returnUrl: string) {
       returnUrl,
     },
     {
-      timeout: 10000,
+      timeout: 30000,
     },
   )
 }
@@ -418,11 +585,11 @@ export function consumeSsoTicket(ticket: string) {
   return request.post<ApiResponse<ExamSsoTicketConsumeVO>>(
     `/api/exam/sso/tickets/${encodeURIComponent(ticket)}/consume`,
     undefined,
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
-// ============ 评审端：学员 AI 自评分数 ============
+// ============ 评审端：学员 AI 阅卷分数 ============
 
 export interface ExamScoreRow {
   enrollmentId?: string | number
@@ -433,6 +600,8 @@ export interface ExamScoreRow {
   loginName?: string
   organization?: string
   tenantName?: string
+  /** 考生租户 ID，用于管理员进入考生配置空间 */
+  tenantId?: string | number
   workType?: string
   workTypeLabel?: string
   workName?: string
@@ -457,7 +626,7 @@ export interface ExamScoreRow {
 export function listReviewerScores(campaignId?: string | number, name?: string) {
   return request.get<ApiResponse<ExamScoreRow[]>>('/api/exam/reviewer/scores', {
     params: { campaignId, name },
-    timeout: 10000,
+    timeout: 30000,
   })
 }
 
@@ -472,11 +641,39 @@ export function exportReviewerScores(campaignId: string | number) {
 export function saveReviewerScore(
   submissionId: string | number,
   finalScore: number,
+  comment?: string,
 ) {
   return request.put<ApiResponse<boolean>>(`/api/exam/reviewer/scores/${submissionId}`, null, {
-    params: { finalScore },
-    timeout: 10000,
+    params: { finalScore, comment },
+    timeout: 30000,
   })
+}
+
+export interface ExamScorePublishResult {
+  campaignId?: string
+  enrollmentCount?: number
+  publishedCount?: number
+  skippedCount?: number
+  pendingReviewCount?: number
+  scoreQueryEnabled?: boolean
+}
+
+/** 发布成绩：先把已复核的本题分固化为实操分，再开启查分；force 为 true 时允许未复核完也发布 */
+export function publishCampaignScores(campaignId: string | number, force = false) {
+  return request.post<ApiResponse<ExamScorePublishResult>>(
+    `/api/exam/reviewer/scores/campaigns/${campaignId}/publish`,
+    null,
+    { params: { force }, timeout: 60000 },
+  )
+}
+
+/** 录入（或清空）考生理论分，满分 100 */
+export function saveTheoryScore(enrollmentId: string | number, score?: number | null) {
+  return request.put<ApiResponse<boolean>>(
+    `/api/exam/reviewer/scores/enrollments/${enrollmentId}/theory-score`,
+    null,
+    { params: { score }, timeout: 30000 },
+  )
 }
 
 export interface SubmissionFileItem {
@@ -523,7 +720,10 @@ export interface ExamQuestionScore {
   packageFiles?: SubmissionFileItem[]
   supplementaryFiles?: SubmissionFileItem[]
   aiScore?: number
+  /** AI 阅卷原始分（配置量表） */
   aiRawScore?: number
+  /** AI 阅卷原始分满分（该题配置可评分项满分） */
+  aiMaxScore?: number
   rawScoreLimit?: number
   dimensionScores?: Record<string, number>
   confidence?: string
@@ -533,11 +733,46 @@ export interface ExamQuestionScore {
   evidence?: SubmissionDimEvidence[]
   risks?: string[]
   suggestions?: string[]
+  /** AI 阅卷报告：分项评分（含满分与评分依据） */
+  dimensionItems?: GradingDimItem[]
+  /** AI 阅卷报告：面向考生的通俗评语 */
+  plainComment?: string
+  /** AI 阅卷报告：设计清单命中条数 */
+  checklistHits?: number
+  /** AI 阅卷报告：设计清单逐条命中说明 */
+  checklistDetail?: string[]
+  /** AI 阅卷报告：完整性 / 真实性标记 */
+  integrityFlags?: string[]
+  /** AI 阅卷报告：主导权（疑似外包）判定状态 */
+  dominanceStatus?: string
+  /** AI 阅卷报告：主导权判定通道明细（A~E） */
+  dominanceChannels?: GradingChannel[]
+  /** AI 阅卷报告：主导权封顶比例与封顶原因 */
+  capRatio?: number
+  capStatus?: string
+  /** AI 阅卷报告：额外扣分与扣分原因 */
+  deductionAmount?: number
+  deductionReason?: string
   finalScore?: number
   finalRawScore?: number
   reviewDimensionScores?: Record<string, number>
   reviewComment?: string
   reviewed?: boolean
+}
+
+/** AI 阅卷报告的单个评分项 */
+export interface GradingDimItem {
+  dimension?: string
+  score?: number
+  max?: number
+  evidence?: string
+}
+
+/** AI 阅卷报告的主导权判定通道 */
+export interface GradingChannel {
+  channel?: string
+  finding?: string
+  evidence?: string
 }
 
 export interface ExamSubmissionDetail {
@@ -548,6 +783,8 @@ export interface ExamSubmissionDetail {
   loginName?: string
   organization?: string
   tenantName?: string
+  /** 考生租户 ID，用于管理员进入考生配置空间 */
+  tenantId?: string | number
   phone?: string
   email?: string
   workName?: string
@@ -588,6 +825,10 @@ export interface ExamSubmissionDetail {
   finalScore?: number
   reviewComment?: string
   reviewed?: boolean
+  /** 理论成绩（满分 100），管理员录入 */
+  theoryScore?: number | null
+  /** 实操成绩（各题复核得分之和），发布时固化 */
+  practicalScore?: number | null
   questionCount?: number
   submittedQuestionCount?: number
   aiScoredQuestionCount?: number
@@ -600,7 +841,7 @@ export function getSubmissionDetail(submissionId: string | number) {
   return request.get<ApiResponse<ExamSubmissionDetail>>(
     `/api/exam/reviewer/scores/${submissionId}/detail`,
     {
-      timeout: 10000,
+      timeout: 30000,
     },
   )
 }
@@ -608,7 +849,7 @@ export function getSubmissionDetail(submissionId: string | number) {
 export function getEnrollmentScoreDetail(enrollmentId: string | number) {
   return request.get<ApiResponse<ExamSubmissionDetail>>(
     `/api/exam/reviewer/scores/enrollments/${enrollmentId}/detail`,
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
@@ -631,7 +872,38 @@ export function listExamQuestions(campaignId: string | number) {
   return request.get<ApiResponse<ExamQuestion[]>>(
     `/api/exam/admin/campaigns/${campaignId}/questions`,
     {
-      timeout: 10000,
+      timeout: 30000,
+    },
+  )
+}
+
+/** 管理端答卷列表行（答卷管理页） */
+export interface ExamSubmissionAdminRow {
+  submissionId?: string | number
+  enrollmentId?: string | number
+  /** 考生所属租户 ID（管理员进入考生智能体配置界面用） */
+  tenantId?: string | number
+  candidateName?: string
+  candidateUsername?: string
+  organization?: string
+  questionId?: string | number
+  questionTitle?: string
+  questionScore?: number
+  agentId?: string | number
+  agentName?: string
+  workType?: string
+  status?: string
+  currentStep?: number
+  submittedAt?: string
+}
+
+/** 管理端答卷列表：按批次拉取全部答卷（含考生/题目/智能体信息） */
+export function listExamSubmissionsForAdmin(campaignId: string | number, name?: string) {
+  return request.get<ApiResponse<ExamSubmissionAdminRow[]>>(
+    `/api/exam/admin/campaigns/${campaignId}/submissions`,
+    {
+      params: name ? { name } : undefined,
+      timeout: 30000,
     },
   )
 }
@@ -644,7 +916,7 @@ export function createExamQuestion(
     `/api/exam/admin/campaigns/${campaignId}/questions`,
     payload,
     {
-      timeout: 10000,
+      timeout: 30000,
     },
   )
 }
@@ -657,7 +929,7 @@ export function updateExamQuestion(
   return request.put<ApiResponse<ExamQuestion>>(
     `/api/exam/admin/campaigns/${campaignId}/questions/${questionId}`,
     payload,
-    { timeout: 10000 },
+    { timeout: 30000 },
   )
 }
 
@@ -665,7 +937,194 @@ export function deleteExamQuestion(campaignId: string | number, questionId: stri
   return request.delete<ApiResponse<void>>(
     `/api/exam/admin/campaigns/${campaignId}/questions/${questionId}`,
     {
-      timeout: 10000,
+      timeout: 30000,
     },
+  )
+}
+
+/* ===================== AI 阅卷（配置评分） ===================== */
+
+/** AI 阅卷单个题目评分格 */
+export interface GradingQuestionCell {
+  questionId?: string | number
+  questionNo?: number
+  questionTitle?: string
+  /** 题目原始满分（exam_question.score） */
+  questionScore?: number
+  submissionId?: string | number
+  agentId?: string | number
+  agentName?: string
+  submissionStatus?: string
+  /** QUEUED / RUNNING / SUCCEEDED / FAILED / 未提交 / 无任务 */
+  taskStatus?: string
+  taskErrorMessage?: string
+  graded?: boolean
+  totalScore?: number
+  configMaxScore?: number
+  dominanceStatus?: string
+  capStatus?: string
+  confidence?: string
+  modelName?: string
+  integrityFlags?: string[]
+  gradedAt?: string
+}
+
+/** AI 阅卷按考生聚合的行 */
+export interface GradingCandidateRow {
+  enrollmentId?: string | number
+  candidateName?: string
+  loginName?: string
+  organization?: string
+  tenantName?: string
+  questionCount?: number
+  submittedCount?: number
+  questions?: GradingQuestionCell[]
+  totalScore?: number
+  /** 考试满分（各题分值之和） */
+  totalMaxScore?: number
+}
+
+/** AI 阅卷总览 */
+export interface GradingOverview {
+  campaignId?: string | number
+  campaignName?: string
+  taskCounts?: Record<string, number>
+  rows?: GradingCandidateRow[]
+}
+
+/** AI 阅卷分项 */
+export interface GradingItem {
+  name?: string
+  score?: number
+  max?: number
+  evidence?: string
+}
+
+/** AI 阅卷单卷详情 */
+export interface GradingDetail {
+  submissionId?: string | number
+  questionId?: string | number
+  questionNo?: number
+  questionTitle?: string
+  questionScore?: number
+  enrollmentId?: string | number
+  candidateName?: string
+  loginName?: string
+  agentId?: string | number
+  agentName?: string
+  submissionStatus?: string
+  taskStatus?: string
+  taskErrorMessage?: string
+  baseScore?: number
+  coefficient?: number
+  checklistHits?: number
+  checklistDetail?: string[]
+  dominanceStatus?: string
+  dominanceChannels?: { channel?: string; finding?: string; evidence?: string }[]
+  items?: GradingItem[]
+  capStatus?: string
+  capRatio?: number
+  deductionAmount?: number
+  deductionReason?: string
+  totalScore?: number
+  configMaxScore?: number
+  confidence?: string
+  /** 通俗评语（面向非技术读者） */
+  plainComment?: string
+  /** 技术版评分摘要（管理员核查用） */
+  summary?: string
+  integrityFlags?: string[]
+  modelName?: string
+  rubricVersion?: string
+  gradedAt?: string
+}
+
+/** 按场次批量开始 AI 阅卷（跳过已有进行中任务的答卷） */
+export function startExamGrading(campaignId: string | number) {
+  return request.post<ApiResponse<Record<string, number>>>(
+    `/api/exam/admin/grading/campaigns/${campaignId}/run`,
+    {},
+    { timeout: 60000 },
+  )
+}
+
+/** 单卷重新评分 */
+export function rerunExamGrading(submissionId: string | number) {
+  return request.post<ApiResponse<boolean>>(
+    `/api/exam/admin/grading/submissions/${submissionId}/rerun`,
+    {},
+    { timeout: 30000 },
+  )
+}
+
+/** AI 阅卷总览（进度统计 + 按考生分组评分行） */
+export function getExamGradingOverview(campaignId: string | number) {
+  return request.get<ApiResponse<GradingOverview>>(
+    `/api/exam/admin/grading/campaigns/${campaignId}/overview`,
+    { timeout: 60000 },
+  )
+}
+
+/** AI 阅卷单卷详情（分项明细 + 主导权判定 + 理由） */
+export function getExamGradingDetail(submissionId: string | number) {
+  return request.get<ApiResponse<GradingDetail>>(
+    `/api/exam/admin/grading/submissions/${submissionId}/detail`,
+    { timeout: 30000 },
+  )
+}
+
+/** 采纳 AI 阅卷分为复核得分 */
+export function adoptExamGrading(submissionId: string | number) {
+  return request.post<ApiResponse<boolean>>(
+    `/api/exam/admin/grading/submissions/${submissionId}/adopt`,
+    {},
+    { timeout: 30000 },
+  )
+}
+
+/* ===================== AI 阅卷模型设置 ===================== */
+
+export interface GradingModelSettings {
+  endpoint?: string
+  model?: string
+  apiKeyMasked?: string
+  apiKeyConfigured?: boolean
+  enabled?: boolean
+}
+
+export interface GradingTestResult {
+  success?: boolean
+  latencyMs?: number
+  message?: string
+}
+
+/** 读取 AI 阅卷模型配置（Key 脱敏） */
+export function getGradingModelSettings() {
+  return request.get<ApiResponse<GradingModelSettings>>(
+    '/api/exam/admin/grading/settings',
+    { timeout: 30000 },
+  )
+}
+
+/** 连通性测试（不落库）；apiKey 留空表示沿用已保存的 Key */
+export function testGradingModelSettings(data: { endpoint: string; model: string; apiKey?: string }) {
+  return request.post<ApiResponse<GradingTestResult>>(
+    '/api/exam/admin/grading/settings/test',
+    data,
+    { timeout: 60000 },
+  )
+}
+
+/** 保存模型配置（后端保存前强制连通性测试，失败不落库） */
+export function saveGradingModelSettings(data: {
+  endpoint: string
+  model: string
+  apiKey?: string
+  enabled: boolean
+}) {
+  return request.post<ApiResponse<GradingTestResult & { saved?: boolean; apiKeyMasked?: string }>>(
+    '/api/exam/admin/grading/settings',
+    data,
+    { timeout: 60000 },
   )
 }

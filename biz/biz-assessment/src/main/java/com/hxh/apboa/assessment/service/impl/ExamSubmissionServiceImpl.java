@@ -20,6 +20,7 @@ import com.hxh.apboa.common.entity.ExamSubmission;
 import com.hxh.apboa.common.exception.BusinessException;
 import com.hxh.apboa.common.util.TenantUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,10 @@ public class ExamSubmissionServiceImpl extends ServiceImpl<ExamSubmissionMapper,
     private final AssessmentReportMapper reportMapper;
     private final AgentDefinitionMapper agentDefinitionMapper;
     private final ExamCampaignMapper campaignMapper;
+
+    /** AI 智评屏蔽开关：false（默认）时交卷不再排队初评任务，考生端展示固定完成提示。 */
+    @Value("${assessment.initial-assessment.enabled:false}")
+    private boolean initialAssessmentEnabled;
 
     @Override
     public ExamSubmission getOwned(Long submissionId, Long accountId) {
@@ -62,13 +67,19 @@ public class ExamSubmissionServiceImpl extends ServiceImpl<ExamSubmissionMapper,
 
             int version = submission.getVersion() == null ? 0 : submission.getVersion();
             var update = new LambdaUpdateWrapper<ExamSubmission>()
-                    .set(ExamSubmission::getAgentId, draft.getAgentId())
                     .set(ExamSubmission::getFormJson, draft.getFormJson())
                     .set(ExamSubmission::getCurrentStep, draft.getCurrentStep())
                     .set(ExamSubmission::getVersion, version + 1)
                     .eq(ExamSubmission::getId, submissionId)
                     .eq(ExamSubmission::getStatus, "DRAFT")
                     .eq(ExamSubmission::getVersion, version);
+            // 2026-09-05 事故复盘：agentId 原先无条件 set，前端某次自动保存（页面重载、
+            // 多标签页、退回上一步）带上空 agentId 时，会把已入库的 agentId 覆盖成 null，
+            // 考生随后点交卷被「请选择平台内智能体后再提交」硬拒（当天 267 次）。
+            // 与下方 workType 保持一致：null 表示“本次未修改”，不参与覆盖。
+            if (draft.getAgentId() != null) {
+                update.set(ExamSubmission::getAgentId, draft.getAgentId());
+            }
             if (draft.getWorkType() != null) {
                 update.set(ExamSubmission::getWorkType, draft.getWorkType());
             }
@@ -121,6 +132,9 @@ public class ExamSubmissionServiceImpl extends ServiceImpl<ExamSubmissionMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ExamSubmission retryAssessment(Long submissionId, Long accountId) {
+        if (!initialAssessmentEnabled) {
+            throw new BusinessException("AI 智评暂未开启，无需重新提交");
+        }
         var submission = getOwned(submissionId, accountId);
         if (!"AI_QUEUED".equals(submission.getStatus())
                 && !"REVIEW_PENDING".equals(submission.getStatus())
@@ -192,7 +206,41 @@ public class ExamSubmissionServiceImpl extends ServiceImpl<ExamSubmissionMapper,
             fillExamTiming(submission, campaign, now);
             return submission;
         }
-        return transitionToSubmitted(submission, "TIMEOUT_SUBMITTED", now);
+        // 2026-09-05 事故复盘：原先一律记为 TIMEOUT_SUBMITTED，导致 80 份空卷与真实作品
+        // 混在一起、还照样排队 AI 智评，既烧算力又污染成绩复核列表（后来不得不在
+        // ExamReviewerScoreServiceImpl 里额外过滤）。这里按内容分级落状态。
+        return transitionToSubmitted(submission, resolveTimeoutStatus(submission), now);
+    }
+
+    /**
+     * 超时收卷状态分级：
+     * - NO_ANSWER：既没绑定智能体也没填任何内容 → 未作答
+     * - PARTIAL_TIMEOUT_SUBMITTED：只完成了一部分 → 不完整
+     * - TIMEOUT_SUBMITTED：内容完整，只是没来得及点交卷 → 有效作品
+     */
+    private String resolveTimeoutStatus(ExamSubmission submission) {
+        boolean hasAgent = submission.getAgentId() != null;
+        boolean hasAnswer = hasAnswer(submission);
+        if (!hasAgent && !hasAnswer) {
+            return "NO_ANSWER";
+        }
+        if (!hasAgent || !hasAnswer) {
+            return "PARTIAL_TIMEOUT_SUBMITTED";
+        }
+        return "TIMEOUT_SUBMITTED";
+    }
+
+    /** form_json 是否含有实质内容（排除 null / 空串 / {} / "null" / "\"\""） */
+    private boolean hasAnswer(ExamSubmission submission) {
+        String formJson = submission.getFormJson();
+        if (formJson == null) {
+            return false;
+        }
+        String trimmed = formJson.trim();
+        return !trimmed.isEmpty()
+                && !"{}".equals(trimmed)
+                && !"\"\"".equals(trimmed)
+                && !"null".equalsIgnoreCase(trimmed);
     }
 
     private ExamSubmission transitionToSubmitted(ExamSubmission submission, String status, LocalDateTime now) {
@@ -208,7 +256,11 @@ public class ExamSubmissionServiceImpl extends ServiceImpl<ExamSubmissionMapper,
             submission.setStatus(status);
             submission.setSubmittedAt(now);
             submission.setVersion(version + 1);
-            createAssessmentTaskIfAbsent(submission);
+            // NO_ANSWER / PARTIAL 不是有效作品：没有绑定智能体时 AI 智评也无法定位作品，
+            // 让它们排队只会白烧算力并污染复核列表。
+            if (shouldQueueAssessment(status)) {
+                createAssessmentTaskIfAbsent(submission);
+            }
         } else {
             var latest = getById(submission.getId());
             if (latest != null && "DRAFT".equals(latest.getStatus())) {
@@ -223,7 +275,16 @@ public class ExamSubmissionServiceImpl extends ServiceImpl<ExamSubmissionMapper,
         return submission;
     }
 
+    /** 只有完整/主动交卷的作品才进入 AI 智评队列 */
+    private boolean shouldQueueAssessment(String status) {
+        return !"NO_ANSWER".equals(status) && !"PARTIAL_TIMEOUT_SUBMITTED".equals(status);
+    }
+
     private void createAssessmentTaskIfAbsent(ExamSubmission submission) {
+        if (!initialAssessmentEnabled) {
+            // AI 智评已屏蔽：交卷后不再排队初评任务，考生端直接展示完成提示。
+            return;
+        }
         var existing = taskMapper.selectOne(new LambdaQueryWrapper<AssessmentTask>()
                 .eq(AssessmentTask::getSubmissionId, submission.getId())
                 .eq(AssessmentTask::getTaskType, "INITIAL_ASSESSMENT")

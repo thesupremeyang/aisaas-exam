@@ -151,7 +151,7 @@ async function handleCategoryConfirm() {
       emit('setCategory', String(props.data.id), categoryValue.value)
     }
   } catch {
-    message.error('设置分类失败')
+    message.warning('设置分类失败')
   }
 }
 

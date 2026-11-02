@@ -13,6 +13,8 @@ public class ExamCandidateStatusVO {
     private Long accountId;
     private String candidateName;
     private String username;
+    private String email;
+    private boolean accountEnabled;
     private String organization;
     private boolean loggedIn;
     private boolean entered;

@@ -5,13 +5,12 @@ import { RouteNames, RoutePaths } from '@/router'
 import { useAccountStore } from '@/stores'
 import { LogoutOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
-import AppLogoV2 from '@/components/layout-v2/AppLogoV2.vue'
 import ExamTimerBadge from './ExamTimerBadge.vue'
 import { issueSsoTicket } from '@/api/exam'
 
 const props = withDefaults(
   defineProps<{
-    /** 当前作品 submissionId，用于「我的作品」「AI 智评」跳转；缺省时这两项禁用 */
+    /** 当前作品 submissionId，用于「我的作品」「评审状态」跳转；缺省时这两项禁用 */
     submissionId?: string
   }>(),
   { submissionId: '' },
@@ -69,7 +68,7 @@ async function openAgentManagement(): Promise<void> {
     if (!ticket) throw new Error('no ticket')
     await router.push({ path: '/agent', query: { examTicket: ticket } })
   } catch {
-    message.error('进入智能体平台失败，请稍后重试')
+    message.warning('进入智能体平台失败，请稍后重试')
   }
 }
 
@@ -160,7 +159,13 @@ async function confirmLogout(): Promise<void> {
 
 <template>
   <header class="portal-topbar">
-    <AppLogoV2 class="portal-brand-logo" />
+    <div class="portal-brand">
+      <span class="portal-brand-icon" aria-hidden="true">
+        <img src="@/assets/images/logo/logo.png" alt="星图AI" />
+      </span>
+      <strong class="portal-brand-name">星图AI智能考试平台</strong>
+    </div>
+
     <nav class="portal-nav">
       <button
         v-for="item in navItems"
@@ -173,82 +178,145 @@ async function confirmLogout(): Promise<void> {
       </button>
     </nav>
 
-    <ExamTimerBadge class="portal-timer" />
-
-    <a-popover
-      v-model:open="popoverOpen"
-      placement="bottomRight"
-      trigger="click"
-      :arrow="false"
-      overlay-class-name="portal-user-popover"
-    >
-      <div class="portal-user">
-        <a-avatar :size="34" :style="{ background: avatarColor }">{{ avatarText }}</a-avatar>
-        <div class="portal-user-meta">
-          <span class="portal-user-name">{{ username }}</span>
-          <span v-if="roleLabel" class="portal-user-sub">{{ roleLabel }}</span>
-        </div>
-        <svg class="portal-user-caret" viewBox="0 0 12 12" width="12" height="12">
-          <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </div>
-
-      <template #content>
-        <div class="user-card">
-          <div class="user-card-head">
-            <a-avatar :size="46" :style="{ background: avatarColor }">{{ avatarText }}</a-avatar>
-            <div class="user-card-info">
-              <div class="user-card-name">{{ username }}</div>
-              <div v-if="roleLabel" class="user-card-role">{{ roleLabel }}</div>
-            </div>
+    <div class="portal-topbar-actions">
+      <ExamTimerBadge class="portal-timer" />
+      <a-popover
+        v-model:open="popoverOpen"
+        placement="bottomRight"
+        trigger="click"
+        :arrow="false"
+        overlay-class-name="portal-user-popover"
+      >
+        <button type="button" class="portal-user" aria-label="账号菜单">
+          <a-avatar :size="32" :style="{ background: avatarColor }">{{ avatarText }}</a-avatar>
+          <div class="portal-user-meta">
+            <span class="portal-user-name">{{ username }}</span>
+            <span v-if="roleLabel" class="portal-user-sub">{{ roleLabel }}</span>
           </div>
-          <a-divider style="margin: 12px 0" />
-          <button class="user-card-logout" @click="confirmLogout">
-            <logout-outlined />
-            <span>退出登录</span>
-          </button>
-        </div>
-      </template>
-    </a-popover>
+          <svg class="portal-user-caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        <template #content>
+          <div class="user-card">
+            <div class="user-card-head">
+              <a-avatar :size="46" :style="{ background: avatarColor }">{{ avatarText }}</a-avatar>
+              <div class="user-card-info">
+                <div class="user-card-name">{{ username }}</div>
+                <div v-if="roleLabel" class="user-card-role">{{ roleLabel }}</div>
+              </div>
+            </div>
+            <a-divider style="margin: 12px 0" />
+            <button class="user-card-logout" @click="confirmLogout">
+              <logout-outlined />
+              <span>退出登录</span>
+            </button>
+          </div>
+        </template>
+      </a-popover>
+    </div>
   </header>
 </template>
 
 
 <style scoped lang="scss">
+/* ── 顶栏：默认（桌面）单行 | 手机两行 ── */
 .portal-topbar {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'brand nav actions';
   align-items: center;
-  gap: 30px;
-  height: 68px;
+  gap: 12px 20px;
+  min-height: 68px;
   padding: 0 28px;
   background: #fff;
   border-bottom: 1px solid #dbe6f6;
+  box-sizing: border-box;
 }
-/* 复用 agent 页面的 AppLogoV2，覆盖外层适配顶栏 */
-.portal-brand-logo {
-  width: auto;
-  height: 100%;
-  padding: 0;
-  gap: 10px;
-}
-.portal-nav {
+
+.portal-brand {
+  grid-area: brand;
   display: flex;
-  gap: 8px;
-  flex: 1;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 240px;
+  overflow: hidden;
 }
+
+.portal-brand-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+  flex-shrink: 0;
+
+  img {
+    width: 28px;
+    height: 28px;
+    display: block;
+    filter: brightness(0) invert(1);
+  }
+}
+
+.portal-brand-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+}
+
+.portal-topbar-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.portal-nav {
+  grid-area: nav;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.portal-nav::-webkit-scrollbar {
+  display: none;
+}
+
 .portal-nav-btn {
-  padding: 8px 14px;
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 14px;
   border: 0;
   border-radius: 8px;
   background: none;
   color: #566982;
-  font: 14px inherit;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
+
 .portal-nav-btn:hover:not(:disabled) {
   color: #1266e8;
   background: #eaf3ff;
@@ -268,9 +336,13 @@ async function confirmLogout(): Promise<void> {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 12px;
+  height: 40px;
+  padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 999px;
+  background: transparent;
+  box-sizing: border-box;
+  flex-shrink: 0;
   cursor: pointer;
   transition: background 0.18s, border-color 0.18s, box-shadow 0.18s;
 }
@@ -282,6 +354,14 @@ async function confirmLogout(): Promise<void> {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  min-width: 0;
+  max-width: 140px;
+}
+.portal-user-name,
+.portal-user-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .portal-user-name {
   font-size: 14px;
@@ -362,21 +442,82 @@ async function confirmLogout(): Promise<void> {
   background: #ffe7e3;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1023px) {
   .portal-topbar {
-    gap: 14px;
-    padding: 0 16px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'brand brand' 'nav actions';
+    gap: 8px;
+    padding: 10px 12px;
   }
-  .portal-nav {
-    gap: 0;
-    overflow-x: auto;
+  .portal-brand {
+    gap: 8px;
+    max-width: none;
   }
-  .portal-nav-btn {
-    padding: 8px 10px;
-    white-space: nowrap;
+  .portal-brand-icon {
+    width: 32px;
+    height: 32px;
+
+    img {
+      width: 24px;
+      height: 24px;
+    }
   }
-  .portal-user-meta {
+  .portal-brand-name {
+    font-size: 14px;
+  }
+  .portal-topbar-actions {
+    gap: 6px;
+  }
+  .portal-user {
+    width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+  .portal-user-meta,
+  .portal-user-caret {
     display: none;
   }
+  .portal-timer {
+    flex-shrink: 0;
+  }
+  .portal-timer :deep(.exam-timer-label) {
+    display: none;
+  }
+  .portal-timer.waiting :deep(.exam-timer-label) {
+    display: inline;
+  }
+  .portal-nav-btn {
+    border-radius: 999px;
+    background: #f3f7fd;
+    font-size: 13px;
+    font-weight: 600;
+  }
 }
+
+@media (max-width: 480px) {
+  .portal-topbar {
+    padding: 10px;
+    column-gap: 6px;
+  }
+  .portal-nav {
+    gap: 4px;
+    min-height: 36px;
+  }
+  .portal-nav-btn {
+    height: 36px;
+    padding: 0 6px;
+    font-size: 12px;
+  }
+  .portal-topbar-actions {
+    gap: 4px;
+  }
+  .portal-user {
+    width: 36px;
+    height: 36px;
+  }
+  .portal-timer {
+    padding: 0 8px;
+  }
+}
+
 </style>

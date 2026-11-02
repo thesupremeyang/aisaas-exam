@@ -50,7 +50,11 @@ export function logout() {
  * 刷新当前页面的在线状态
  */
 export function heartbeat() {
-  return request.post<ApiResponse<void>>('/api/auth/heartbeat')
+  return request.post<ApiResponse<void>>('/api/auth/heartbeat', null, {
+    silent: true,
+    retry: 1,
+    timeout: 15000,
+  })
 }
 
 /**
@@ -83,6 +87,15 @@ export function adminCreateAccount(data: RegisterRequest) {
  */
 export function selectTenant(data: SelectTenantRequest) {
   return request.post<ApiResponse<LoginResponse>>('/api/auth/select-tenant', data)
+}
+
+/**
+ * 平台管理员进入考生租户查看（模拟令牌：考生租户上下文、无平台豁免；
+ * 退出查看时前端换回管理员原令牌）
+ * POST /auth/admin/view-tenant
+ */
+export function adminViewTenant(tenantId: string | number) {
+  return request.post<ApiResponse<LoginResponse>>('/api/auth/admin/view-tenant', { tenantId })
 }
 
 /**

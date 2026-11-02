@@ -1,142 +1,62 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { message, Modal } from 'ant-design-vue'
-import { useExamStore } from '@/stores'
-import { decodeAssessmentReport } from './report'
-import { currentExamRubric } from './rubric'
+import { useRouter } from 'vue-router'
+import { getCandidateSubmission } from '@/api/exam'
+import { RouteNames } from '@/router/constants'
 
 const props = defineProps<{ submissionId: string }>()
-const examStore = useExamStore()
-const polling = ref<number | undefined>()
-const retrying = ref(false)
+const router = useRouter()
 
-const report = computed(() => decodeAssessmentReport(examStore.report?.reportJson))
-const dimensions = computed(() => currentExamRubric().map((item) => ({
-  code: item.key, name: item.label, maxScore: item.maximum, comment: item.description,
-  score: report.value.dimensionScores[item.key] || 0,
-})))
-const rubricTotal = computed(() => dimensions.value.reduce((total, item) => total + item.maxScore, 0))
-const aiEvidenceItems = [
-  {
-    title: '作品说明与功能目标',
-    content: '统一查看作品目标、适用场景、使用对象及核心功能，确认提交内容与考试要求一致。',
-  },
-  {
-    title: '演示视频与操作截图',
-    content: '结合演示过程和关键操作截图核验功能表现，让作品结果有清晰、可复核的展示依据。',
-  },
-  {
-    title: '技术方案与配置摘要',
-    content: '检查模型、提示词、知识库、技能与工具等配置，全面了解作品的技术实现与运行逻辑。',
-  },
-  {
-    title: '代码、资源与部署说明',
-    content: '关注代码包、依赖资源和部署条件，评估作品的完整性、可追溯性与复现条件。',
-  },
-  {
-    title: '统一标准与多维度复核',
-    content: '按照同一评分标准，从场景价值、功能完整度、创新性、技术说明和可验证性等维度综合评估。',
-  },
-]
-const taskState = computed(() => examStore.task?.status || 'QUEUED')
-const hasTask = computed(() => !!examStore.task)
-const completed = computed(() => taskState.value === 'SUCCEEDED' || !!examStore.report)
-const notSubmitted = computed(() => !hasTask.value && !examStore.report)
-const failed = computed(() => taskState.value === 'FAILED')
-const failureMessage = computed(() => {
-  const detail = examStore.task?.errorMessage?.trim() || ''
-  if (/timeout|timed out|超时/i.test(detail)) {
-    return 'AI 评测服务本次响应超时，已提交的作品内容仍然保留，可以点击下方按钮重新提交并参与评价。'
-  }
-  return '本次作品提交的 AI 智评未能成功生成，已提交的作品内容仍然保留，可以点击下方按钮重新提交并参与评价。'
-})
-const assessmentStages = [
-  { title: '读取作品材料', description: '确认已提交内容与材料' },
-  { title: '对齐统一标准', description: '按本批次 Rubric 逐项核验' },
-  { title: '检查评分依据', description: '提取可复核的材料证据' },
-  { title: '整理智评结果', description: '生成结构化评测报告' },
-]
-const progressPercent = computed(() => {
-  const progress = Number(examStore.task?.progress)
-  if (Number.isFinite(progress)) return Math.min(100, Math.max(0, progress))
-  return taskState.value === 'RUNNING' ? 35 : 10
-})
-const currentStageIndex = computed(() => {
-  if (taskState.value === 'QUEUED') return 0
-  if (progressPercent.value < 55) return 1
-  if (progressPercent.value < 80) return 2
-  return 3
-})
-const currentStage = computed(() => assessmentStages[currentStageIndex.value] ?? {
-  title: '读取作品材料',
-  description: '确认已提交内容与材料',
-})
-const badgeText = computed(() => {
-  if (notSubmitted.value) return '待提交'
-  if (completed.value) return '智评完成'
-  if (failed.value) return '智评失败'
-  return '结果生成中'
-})
-const conclusionRejected = computed(() =>
-  /不及格|不通过|无效|乱填|不合格|不符合|否决|驳回/.test(report.value.conclusion || ''),
+/**
+ * AI 智评已屏蔽（assessment.initial-assessment.enabled=false）：
+ * 提交后不再执行真实评测任务，本页只承担提交完成提示：
+ * 刚提交 → 先展示「AI 智评正在进行」过场，随后显示「考试完毕」；
+ * 再次进入 → 直接显示「考试完毕」；未提交 → 提示先去提交。
+ */
+type Phase = 'checking' | 'showcase' | 'done' | 'not-submitted'
+const phase = ref<Phase>('checking')
+const submittedStatus = ref('')
+
+/** 由系统超时收卷的三种状态（含内容不完整与未作答） */
+const isTimeoutSubmitted = computed(() =>
+  ['TIMEOUT_SUBMITTED', 'PARTIAL_TIMEOUT_SUBMITTED', 'NO_ANSWER'].includes(submittedStatus.value),
 )
-const conclusionBadge = computed(() =>
-  conclusionRejected.value
-    ? { text: '建议不通过 · 进入复核', cls: 'rejected' }
-    : { text: '建议通过 · 进入复核', cls: 'passed' },
-)
+
+/** 过场展示时长（毫秒） */
+const SHOWCASE_MS = 3200
+let showcaseTimer: number | undefined
 
 async function load() {
   try {
-    await examStore.loadTask(props.submissionId)
-    if (completed.value) await examStore.loadReport(props.submissionId)
-    else examStore.report = null
-    syncPolling()
-  } catch {
-    message.error('加载 AI 智评记录失败，请稍后重试')
-  }
-}
-
-function stopPolling() {
-  if (polling.value) window.clearInterval(polling.value)
-  polling.value = undefined
-}
-
-function syncPolling() {
-  if (completed.value || notSubmitted.value || failed.value) {
-    stopPolling()
-    return
-  }
-  if (!polling.value) polling.value = window.setInterval(load, 2500)
-}
-
-function retryAssessment() {
-  if (retrying.value) return
-  Modal.confirm({
-    title: '重新提交作品',
-    content: '将使用当前已提交的作品材料重新排队 AI 智评，确认继续吗？',
-    okText: '重新提交',
-    cancelText: '取消',
-    onOk: async () => {
-      retrying.value = true
-      try {
-        await examStore.retryAssessment(props.submissionId)
-        message.success('作品已重新提交，正在重新生成 AI 智评')
-        await load()
-      } catch {
-        message.error('重新提交失败，请稍后重试')
-      } finally {
-        retrying.value = false
+    const response = await getCandidateSubmission(props.submissionId)
+    const submission = response.data.data || null
+    submittedStatus.value = submission?.status || ''
+    if (submission && submission.status && submission.status !== 'DRAFT') {
+      const justSubmitted = sessionStorage.getItem('exam:just-submitted') === String(props.submissionId)
+      sessionStorage.removeItem('exam:just-submitted')
+      if (justSubmitted) {
+        phase.value = 'showcase'
+        showcaseTimer = window.setTimeout(() => {
+          phase.value = 'done'
+        }, SHOWCASE_MS)
+      } else {
+        phase.value = 'done'
       }
-    },
-  })
+    } else {
+      phase.value = 'not-submitted'
+    }
+  } catch {
+    phase.value = 'not-submitted'
+  }
 }
 
-onMounted(async () => {
-  await load()
-})
+function backToPortal() {
+  void router.push({ name: RouteNames.EXAM_PORTAL })
+}
+
+onMounted(load)
 onBeforeUnmount(() => {
-  stopPolling()
+  if (showcaseTimer) window.clearTimeout(showcaseTimer)
 })
 </script>
 
@@ -144,73 +64,23 @@ onBeforeUnmount(() => {
   <main class="assessment-page">
     <section class="title-row">
       <div>
-        <p class="eyebrow">AI 智评报告</p>
-        <h1>智能体作品 AI 智评</h1>
-        <p class="lead">基于考生填报信息、受控材料和平台内智能体配置摘要生成；最终成绩以评委发布为准。</p>
+        <p class="eyebrow">评审状态</p>
+        <h1>作品提交结果</h1>
+        <p class="lead">您的作品已提交，评审工作将按统一标准进行；最终成绩以评委发布为准。</p>
       </div>
-      <span class="badge" :class="{ processing: !completed }">{{ badgeText }}</span>
+      <span class="badge" :class="{ processing: phase === 'showcase' }">
+        {{ phase === 'showcase' ? 'AI 智评正在进行' : phase === 'done' ? '已提交' : '待提交' }}
+      </span>
     </section>
 
-    <section v-if="completed" class="thinking-card">
-      <div class="thinking-head"><b>AI 智评过程</b><span>已完成</span></div>
-      <ul>
-        <li class="done">解析作品信息、材料与智能体配置摘要</li>
-        <li class="done">对齐本批次评分标准 Rubric</li>
-        <li class="done">提取可引用评分证据、风险点和改进建议</li>
-        <li class="done">生成结构化 AI 智评报告</li>
-      </ul>
-    </section>
-
-    <template v-if="completed">
-      <section class="result-card">
-        <div class="score-panel" style="display: none">
-          <small>AI 建议总分</small><strong>{{ report.totalScore }}</strong><small>/ {{ rubricTotal }}</small>
-          <p>{{ conclusionBadge.text }}</p>
-        </div>
-        <div class="conclusion-panel">
-          <div class="conclusion-title">AI智评建议 <span :class="conclusionBadge.cls">{{ conclusionBadge.text }}</span></div>
-        </div>
-      </section>
-
-      <section class="score-grid" style="display: none">
-        <article v-for="item in dimensions" :key="item.code">
-          <span>{{ item.name }}</span><b style="display: none">{{ item.score }}<small>/{{ item.maxScore }}</small></b>
-          <div class="bar" style="display: none"><i :style="{ width: `${item.maxScore ? item.score / item.maxScore * 100 : 0}%` }" /></div>
-          <p>{{ item.comment }}</p>
-        </article>
-      </section>
-
-      <section class="evidence-card">
-        <div><h2 class="section-title-blue">AI智评依据</h2></div>
-        <div class="evidence-list"><div v-for="evidence in aiEvidenceItems" :key="evidence.title"><b>{{ evidence.title }}</b><span>{{ evidence.content }}</span></div></div>
-      </section>
-      <section class="advice-card" v-if="false">
-        <h2 class="section-title-blue">改进意见</h2>
-        <div v-if="report.risks.length || report.suggestions.length" class="advice-content">
-          <div v-if="report.risks.length"><b>风险点</b><ul><li v-for="item in report.risks" :key="item">{{ item }}</li></ul></div>
-          <div v-if="report.suggestions.length"><ul><li v-for="item in report.suggestions" :key="item">{{ item }}</li></ul></div>
-        </div>
-        <p v-else>本报告为历史版本，未生成风险点与改进建议。</p>
-      </section>
-    </template>
-    <section v-if="notSubmitted" class="generating-notice not-submitted">
-      <h2>尚未提交作品材料</h2>
-      <p>当前考试尚未提交任何作品材料，暂无可进行 AI 智评的内容。请先在「我的作品」页面完成作品提交后再查看 AI 智评报告。</p>
-    </section>
-    <section v-else-if="failed" class="generating-notice failed">
-      <h2>AI 智评生成失败</h2>
-      <p>{{ failureMessage }}</p>
-      <div class="failed-actions">
-        <a-button type="primary" :loading="retrying" @click="retryAssessment">重新提交</a-button>
-      </div>
-    </section>
-    <section v-else-if="!completed" class="assessment-loading-card" aria-live="polite">
+    <!-- 提交成功过场：AI 智评正在进行 -->
+    <section v-if="phase === 'showcase'" class="assessment-loading-card" aria-live="polite">
       <div class="loading-topline">
         <div class="loading-status">
           <span class="live-dot" aria-hidden="true" />
-          <span>{{ taskState === 'QUEUED' ? '智评任务已排队' : '公平智评流程运行中' }}</span>
+          <span>AI 智评正在进行</span>
         </div>
-        <span class="loading-refresh">页面会自动更新</span>
+        <span class="loading-refresh">请稍候</span>
       </div>
 
       <div class="loading-body">
@@ -231,50 +101,56 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="loading-copy">
-          <h2>AI 正在逐项智评作品</h2>
-          <div class="current-check">
-            <span class="current-check-index">{{ String(currentStageIndex + 1).padStart(2, '0') }}</span>
-            <span class="current-check-copy">
-              <small>当前检查</small>
-              <strong>{{ currentStage.title }}</strong>
-              <span>{{ currentStage.description }}</span>
-            </span>
-            <span class="current-check-pulse" aria-hidden="true" />
-          </div>
+          <h2>AI 智评正在进行</h2>
+          <p class="showcase-lead">
+            系统正在按照本批次统一的评分标准核验您提交的作品材料与智能体配置摘要，
+            评审完成后将由评委复核确认成绩。
+          </p>
         </div>
       </div>
 
       <div class="loading-progress">
         <div class="progress-heading">
-          <span>智评进度</span>
-          <strong>{{ progressPercent }}%</strong>
+          <span>评审进度</span>
         </div>
-        <div
-          class="progress-track"
-          role="progressbar"
-          aria-label="AI 智评进度"
-          aria-valuemin="0"
-          aria-valuemax="100"
-          :aria-valuenow="progressPercent"
-        >
-          <span class="progress-fill" :style="{ transform: `scaleX(${progressPercent / 100})` }" />
+        <div class="progress-track" role="progressbar" aria-label="AI 智评进度">
+          <span class="progress-fill showcase-fill" />
           <span class="progress-sheen" aria-hidden="true" />
         </div>
         <div class="progress-foot">
-          <span>{{ taskState === 'QUEUED' ? '正在准备评测资源' : '评测结果将自动保存' }}</span>
-          <span>最终结果由评委复核确认</span>
+          <span>结果将自动保存</span>
+          <span>最终成绩由评委复核确认</span>
         </div>
       </div>
+    </section>
 
-      <div class="loading-principles">
-        <div v-for="(stage, index) in assessmentStages.slice(0, 3)" :key="stage.title" class="principle-item">
-          <span class="principle-index">{{ String(index + 1).padStart(2, '0') }}</span>
-          <span>
-            <b>{{ stage.title }}</b>
-            <small>{{ stage.description }}</small>
-          </span>
-        </div>
+    <!-- 考试完毕 -->
+    <section v-else-if="phase === 'done'" class="done-card">
+      <div class="done-icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none">
+          <circle cx="32" cy="32" r="30" />
+          <path d="m20 33 8 8 16-18" />
+        </svg>
       </div>
+      <h2>考试完毕，祝您取得优异的成绩</h2>
+      <p>
+        您的作品<template v-if="isTimeoutSubmitted">（含系统自动交卷）</template>已提交成功，
+        最终成绩将由评委评定，成绩发布后可在考试门户查询。
+      </p>
+      <div class="done-actions">
+        <a-button type="primary" size="large" @click="backToPortal">返回考试门户</a-button>
+      </div>
+    </section>
+
+    <!-- 未提交 -->
+    <section v-else-if="phase === 'not-submitted'" class="generating-notice not-submitted">
+      <h2>尚未提交作品材料</h2>
+      <p>当前考试尚未提交任何作品材料。请先在「我的作品」页面完成作品提交后再查看评审状态。</p>
+    </section>
+
+    <!-- 状态确认中 -->
+    <section v-else class="generating-notice">
+      <p>正在确认提交状态…</p>
     </section>
   </main>
 </template>
@@ -788,5 +664,77 @@ onBeforeUnmount(() => {
     opacity: 0.6;
     transform: rotate(90deg);
   }
+}
+
+/* 提交完成流程（AI 智评屏蔽后的过场与完成卡） */
+.showcase-lead {
+  margin: 0;
+  color: #6d7c94;
+  line-height: 1.8;
+}
+
+.showcase-fill {
+  animation: showcase-progress 3s cubic-bezier(0.25, 0.6, 0.35, 1) forwards;
+}
+
+@keyframes showcase-progress {
+  from {
+    transform: scaleX(0.08);
+  }
+
+  to {
+    transform: scaleX(0.92);
+  }
+}
+
+.done-card {
+  margin-top: 18px;
+  padding: 56px 24px;
+  text-align: center;
+  background: linear-gradient(160deg, #f2f9ff 0%, #ffffff 70%);
+  border: 1px solid #d5e7fa;
+  border-radius: 20px;
+  box-shadow: 0 22px 55px #1b5ea812;
+}
+
+.done-icon {
+  width: 84px;
+  height: 84px;
+  margin: 0 auto 18px;
+}
+
+.done-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.done-icon circle {
+  fill: #e8f4ff;
+  stroke: #2b7de9;
+  stroke-width: 2.5;
+}
+
+.done-icon path {
+  stroke: #1d66bb;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.done-card h2 {
+  margin: 0 0 12px;
+  color: #174f9d;
+  font: 700 26px/1.35 Georgia, 'Microsoft YaHei', serif;
+}
+
+.done-card p {
+  max-width: 560px;
+  margin: 0 auto;
+  color: #6d7c94;
+  line-height: 1.8;
+}
+
+.done-actions {
+  margin-top: 26px;
 }
 </style>

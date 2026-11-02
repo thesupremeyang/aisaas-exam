@@ -116,7 +116,7 @@ async function handleSwitchTenant(tenant: TenantInfo) {
         message.success('已切换工作空间')
         location.reload()
       } catch {
-        message.error('切换失败，请重试')
+        message.warning('切换失败，请重试')
       } finally {
         switchingTenant.value = false
       }

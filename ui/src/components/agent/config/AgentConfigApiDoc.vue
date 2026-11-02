@@ -43,7 +43,7 @@ async function loadChatKey(refresh: boolean = false) {
     }
   } catch (error) {
     console.error('获取chatKey失败:', error)
-    message.error('获取对话链接失败')
+    message.warning('获取对话链接失败')
   } finally {
     chatKeyLoading.value = false
   }
@@ -97,7 +97,7 @@ async function copyToClipboard(text: string, key: string) {
     message.success('已复制')
     setTimeout(() => { copiedKey.value = '' }, 2000)
   } catch {
-    message.error('复制失败')
+    message.warning('复制失败')
   }
 }
 

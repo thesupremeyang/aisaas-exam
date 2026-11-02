@@ -133,7 +133,7 @@ async function loadList() {
       label: `${a.name} (${a.agentCode})`,
     }))
   } catch (e: any) {
-    message.error('加载广场列表失败：' + (e?.message ?? ''))
+    message.warning('加载广场列表失败：' + (e?.message ?? ''))
   } finally {
     loading.value = false
   }

@@ -14,6 +14,12 @@ import java.util.List;
  * @author huxuehao
  */
 public interface AgentDefinitionService extends IService<AgentDefinition> {
+    /**
+     * 将外部传入的智能体 key 解析为内部数字 id。
+     * 兼容两种写法：数字主键 id，或 agentCode（如 exam-candidate-xxx-agent001）。
+     */
+    Long resolveAgentId(String agentKey);
+
     AgentDefinitionVO agentDefinitionDetail(Long id);
     Boolean saveAgentDefinition(AgentDefinitionVO agentDefinition);
     Boolean updateAgentDefinition(AgentDefinitionVO agentDefinition);

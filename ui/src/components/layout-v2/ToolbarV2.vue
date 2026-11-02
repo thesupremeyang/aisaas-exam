@@ -1,30 +1,12 @@
 <script setup lang="ts">
 import { useAccountStore } from '@/stores'
-import { QuestionCircleOutlined, UndoOutlined } from '@ant-design/icons-vue'
+import { UndoOutlined } from '@ant-design/icons-vue'
 
 const { setRefresh } = useAccountStore()
-
-const helpUrl = import.meta.env.DEV
-  ? `${import.meta.env.BASE_URL}doc.html#/`
-  : '/doc.html#/'
-
-function openHelp() {
-  const helpWindow = window.open(helpUrl, '_blank', 'noopener,noreferrer')
-  if (!helpWindow) {
-    window.location.assign(helpUrl)
-  }
-}
 </script>
 
 <template>
   <div class="toolbar-v2">
-    <ATooltip placement="right">
-      <template #title><span>帮助</span></template>
-      <AButton class="toolbar-v2-btn" shape="circle" type="text" @click="openHelp">
-        <template #icon><QuestionCircleOutlined /></template>
-      </AButton>
-    </ATooltip>
-
     <ATooltip placement="right">
       <template #title><span>刷新</span></template>
       <AButton class="toolbar-v2-btn" shape="circle" type="text" @click="setRefresh">

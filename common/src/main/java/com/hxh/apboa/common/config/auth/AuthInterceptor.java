@@ -175,9 +175,20 @@ public class AuthInterceptor implements HandlerInterceptor {
         // 设置租户上下文
         if (userDetail.getTenantId() != null) {
             TenantUtils.setCurrentTenant(userDetail.getTenantId(), userDetail.getTenantCode());
-            log.warn("[DEBUG3] AuthInterceptor set tenant={} path={}", userDetail.getTenantId(), request.getRequestURI());
+            // 2026-09-05 事故复盘：这里原本是 log.warn，每个请求打一条，全天 22 万条噪音
+            // 把真正的 ERROR 完全淹没。租户上下文是常规链路信息，降到 DEBUG。
+            log.debug("[DEBUG3] AuthInterceptor set tenant={} path={}", userDetail.getTenantId(), request.getRequestURI());
         } else {
-            log.warn("[DEBUG3] AuthInterceptor tenant is null path={}", request.getRequestURI());
+            log.debug("[DEBUG3] AuthInterceptor tenant is null path={}", request.getRequestURI());
+        }
+
+        // 平台管理员跨租户豁免：答卷管理、代管对话等管理端功能需要访问考生租户数据。
+        // 判定来源：账号表 platform_admin 标记（随登录 token 快照）。
+        // 注意：管理员"进入考生配置界面"的模拟令牌中 platformAdmin=false，
+        // 因此模拟态下不豁免，Skill/知识库等所有页面天然只显示考生租户内容。
+        // postHandle 中 TenantUtils.clear() 会一并清除 ignore 标记，不存在线程复用泄漏。
+        if (Boolean.TRUE.equals(userDetail.getPlatformAdmin())) {
+            TenantUtils.setIgnoreTenant();
         }
 
         // 检查接口权限

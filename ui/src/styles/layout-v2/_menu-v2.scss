@@ -339,8 +339,8 @@
   }
 }
 
-/* 中等屏幕收起为窄条时，只显示图标 */
-@media (max-width: 1024px) {
+/* 中等屏幕（桌面窄侧栏）收起为窄条时，只显示图标 */
+@media (min-width: 769px) and (max-width: 1024px) {
   .app-menu-v2 {
     padding: 12px 6px;
   }
@@ -363,6 +363,29 @@
 
     .menu-v2-label {
       display: none;
+    }
+  }
+}
+
+/* 手机抽屉（≤768）：恢复带文案的完整菜单，不影响电脑端窄条 */
+@media (max-width: 768px) {
+  .app-menu-v2 {
+    padding: 12px 10px;
+  }
+
+  .group-v2-title {
+    padding: 0 12px;
+    justify-content: flex-start;
+    font-size: 11px;
+  }
+
+  .menu-v2-item {
+    padding: 11px 12px;
+    justify-content: flex-start;
+    gap: 12px;
+
+    .menu-v2-label {
+      display: block;
     }
   }
 }

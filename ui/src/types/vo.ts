@@ -87,6 +87,8 @@ export interface AccountVO {
   email: string
   username: string
   enabled: boolean
+  /** 是否平台管理员 */
+  platformAdmin?: boolean
   tenantRole?: string
   createdAt?: string
   updatedAt?: string

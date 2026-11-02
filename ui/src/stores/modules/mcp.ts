@@ -189,7 +189,7 @@ export const useMcpStore = defineStore('mcp', () => {
 
   function showConnectionMessage(server: McpServerVO, action: string) {
     if (server.activationStatus === McpActivationStatus.FAILED) {
-      message.error(`${action}失败，${server.activationMessage || '请检查 MCP 配置'}`)
+      message.warning(`${action}失败，${server.activationMessage || '请检查 MCP 配置'}`)
       return
     }
 

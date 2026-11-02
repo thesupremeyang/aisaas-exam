@@ -6,23 +6,28 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hxh.apboa.account.mapper.AccountMapper;
 import com.hxh.apboa.account.mapper.TenantMapper;
 import com.hxh.apboa.agent.mapper.AgentDefinitionMapper;
+import com.hxh.apboa.assessment.dto.ExamScorePublishVO;
 import com.hxh.apboa.assessment.dto.ExamScoreRowVO;
 import com.hxh.apboa.assessment.dto.ExamSubmissionDetailVO;
-import com.hxh.apboa.assessment.mapper.AssessmentReportMapper;
+import com.hxh.apboa.assessment.mapper.AssessmentResultMapper;
 import com.hxh.apboa.assessment.mapper.AssessmentReviewMapper;
 import com.hxh.apboa.assessment.mapper.ExamCampaignMapper;
 import com.hxh.apboa.assessment.mapper.ExamEnrollmentMapper;
+import com.hxh.apboa.assessment.mapper.ExamGradingResultMapper;
 import com.hxh.apboa.assessment.mapper.ExamQuestionMapper;
 import com.hxh.apboa.assessment.mapper.ExamSubmissionMapper;
 import com.hxh.apboa.assessment.service.AssessmentRubric;
+import com.hxh.apboa.assessment.service.ExamCampaignAdminService;
+import com.hxh.apboa.assessment.service.ExamCampaignTiming;
 import com.hxh.apboa.assessment.service.ExamScoreConverter;
 import com.hxh.apboa.assessment.service.ExamReviewerScoreService;
 import com.hxh.apboa.common.entity.Account;
 import com.hxh.apboa.common.entity.AgentDefinition;
-import com.hxh.apboa.common.entity.AssessmentReport;
+import com.hxh.apboa.common.entity.AssessmentResult;
 import com.hxh.apboa.common.entity.AssessmentReview;
 import com.hxh.apboa.common.entity.ExamCampaign;
 import com.hxh.apboa.common.entity.ExamEnrollment;
+import com.hxh.apboa.common.entity.ExamGradingResult;
 import com.hxh.apboa.common.entity.ExamQuestion;
 import com.hxh.apboa.common.entity.ExamSubmission;
 import com.hxh.apboa.common.entity.Tenant;
@@ -45,8 +50,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,40 +69,49 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final double FINAL_SCORE_WEIGHT = 0.8d;
+    private static final double THEORY_SCORE_WEIGHT = 0.2d;
+    private static final int THEORY_SCORE_MAX = 100;
+    /** 复核来源：人工复核。 */
+    private static final String SOURCE_MANUAL = "MANUAL";
 
     private final ExamSubmissionMapper submissionMapper;
     private final ExamEnrollmentMapper enrollmentMapper;
     private final ExamCampaignMapper campaignMapper;
-    private final AssessmentReportMapper reportMapper;
+    private final ExamGradingResultMapper gradingResultMapper;
     private final AssessmentReviewMapper reviewMapper;
+    private final AssessmentResultMapper resultMapper;
     private final AccountMapper accountMapper;
     private final TenantMapper tenantMapper;
     private final AgentDefinitionMapper agentDefinitionMapper;
     private final ExamQuestionMapper questionMapper;
+    private final ExamCampaignAdminService campaignAdminService;
 
     @Override
     public List<ExamScoreRowVO> listScores(Long campaignId, String nameFilter) {
+        // 本接口跨租户聚合全部考生，不传场次会返回全库考生（含身份证、手机号），必须限定场次。
+        if (campaignId == null) {
+            throw new IllegalArgumentException("请指定考试场次");
+        }
         // 成绩复核面向全部学员，跨租户查询；已提交作品：排除 DRAFT（未提交）
         TenantUtils.setIgnoreTenant();
         try {
-            List<Long> campaignEnrollmentIds = campaignId == null ? List.of() : enrollmentMapper.selectList(
+            List<Long> campaignEnrollmentIds = enrollmentMapper.selectList(
                             new LambdaQueryWrapper<ExamEnrollment>()
                                     .eq(ExamEnrollment::getCampaignId, campaignId))
                     .stream().map(ExamEnrollment::getId).filter(Objects::nonNull).toList();
-            if (campaignId != null && campaignEnrollmentIds.isEmpty()) {
+            if (campaignEnrollmentIds.isEmpty()) {
                 return List.of();
             }
 
             LambdaQueryWrapper<ExamSubmission> submissionQuery = new LambdaQueryWrapper<ExamSubmission>()
+                    .in(ExamSubmission::getEnrollmentId, campaignEnrollmentIds)
                     .ne(ExamSubmission::getStatus, "DRAFT")
                     .orderByDesc(ExamSubmission::getSubmittedAt)
                     .orderByDesc(ExamSubmission::getUpdatedAt);
-            if (campaignId != null) {
-                submissionQuery.in(ExamSubmission::getEnrollmentId, campaignEnrollmentIds);
-            }
             List<ExamSubmission> submissions = submissionMapper.selectList(submissionQuery)
                     .stream()
-                    // 超时任务会把未填写的草稿转为 TIMEOUT_SUBMITTED；这类记录不是有效作品，不能出现在成绩复核作品列表中。
+                    // 超时交卷已分级：NO_ANSWER / PARTIAL_TIMEOUT_SUBMITTED 不是有效作品，
+                    // 不能出现在成绩复核作品列表中（此前只能靠下面的内容判断兜底）。
                     .filter(this::hasSubmittedWork)
                     .toList();
             if (submissions.isEmpty()) {
@@ -143,7 +161,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
 
             List<Long> submissionIds = submissions.stream().map(ExamSubmission::getId)
                     .filter(Objects::nonNull).toList();
-            Map<Long, AssessmentReport> reportMap = loadLatestReports(submissionIds);
+            Map<Long, ExamGradingResult> gradingMap = loadLatestGradingResults(submissionIds);
             Map<Long, AssessmentReview> reviewMap = loadLatestReviews(submissionIds);
 
             return submissionsByEnrollment.entrySet().stream().map(entry -> {
@@ -168,12 +186,15 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                 // 保留首条提交 ID 兼容旧调用方；列表行本身按 enrollmentId 唯一。
                 vo.setSubmissionId(firstSubmission.getId());
                 vo.setCandidateName(candidateName(identity.applicantName(), enrollment, account, campaign));
-                vo.setIdentityNumber(identity.identityNumber());
-                vo.setPhone(identity.phone());
+                // 列表是一次性聚合全场次考生的批量视图，只返回脱敏值；
+                // 管理员需要核对单个考生身份时走详情接口（已鉴权，返回明文）。
+                vo.setIdentityNumber(maskSensitive(identity.identityNumber()));
+                vo.setPhone(maskSensitive(identity.phone()));
                 vo.setOrganization(firstNonBlank(identity.organization(),
                         enrollment == null ? null : enrollment.getOrganization()));
                 vo.setLoginName(account == null ? null : account.getUsername());
                 vo.setTenantName(tenant == null ? null : tenant.getName());
+                vo.setTenantId(enrollment == null ? null : enrollment.getTenantId());
                 vo.setWorkType(firstSubmission.getWorkType());
                 vo.setWorkTypeLabel(workTypeLabel(firstSubmission.getWorkType()));
                 vo.setSubmissionStatus(firstSubmission.getStatus());
@@ -194,16 +215,17 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                 int reviewedCount = 0;
                 int finalTotal = 0;
                 int finalScoredCount = 0;
-                AssessmentReport representativeReport = null;
+                ExamGradingResult representativeGrading = null;
                 AssessmentReview representativeReview = null;
                 for (ExamSubmission submission : enrollmentSubmissions) {
                     ExamQuestion question = questionMap.get(submission.getQuestionId());
                     int questionLimit = questionLimit(question, rawScoreLimit);
-                    AssessmentReport report = reportMap.get(submission.getId());
-                    if (report != null && report.getTotalScore() != null) {
+                    ExamGradingResult grading = gradingMap.get(submission.getId());
+                    Integer aiScore = gradingQuestionScore(grading, questionLimit);
+                    if (aiScore != null) {
                         aiScoredCount++;
-                        aiTotal += convertedScore(report.getTotalScore(), rawScoreLimit, questionLimit);
-                        if (representativeReport == null) representativeReport = report;
+                        aiTotal += aiScore;
+                        if (representativeGrading == null) representativeGrading = grading;
                     }
                     AssessmentReview review = reviewMap.get(submission.getId());
                     if (isReviewed(review)) {
@@ -221,10 +243,10 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                 vo.setReviewedQuestionCount(reviewedCount);
                 vo.setFinalScore(finalScoredCount == 0 ? null : finalTotal);
                 vo.setReviewed(!enrollmentSubmissions.isEmpty() && reviewedCount == enrollmentSubmissions.size());
-                if (representativeReport != null) {
-                    vo.setConfidence(representativeReport.getConfidence());
-                    vo.setModelName(representativeReport.getModelName());
-                    vo.setAiScoredAt(representativeReport.getCreatedAt());
+                if (representativeGrading != null) {
+                    vo.setConfidence(representativeGrading.getConfidence());
+                    vo.setModelName(representativeGrading.getModelName());
+                    vo.setAiScoredAt(representativeGrading.getCreatedAt());
                 }
                 if (representativeReview != null) {
                     vo.setReviewComment(representativeReview.getComment());
@@ -291,10 +313,10 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
 
             List<Long> submissionIds = submissions.stream().map(ExamSubmission::getId)
                     .filter(Objects::nonNull).toList();
-            Map<Long, AssessmentReport> reportMap = loadLatestReports(submissionIds);
+            Map<Long, ExamGradingResult> gradingMap = loadLatestGradingResults(submissionIds);
             Map<Long, AssessmentReview> reviewMap = loadLatestReviews(submissionIds);
             return buildScoreWorkbook(campaign, questions, enrollments, submissionsByEnrollment,
-                    accountMap, reportMap, reviewMap);
+                    accountMap, gradingMap, reviewMap);
         } finally {
             TenantUtils.clearIgnoreTenant();
         }
@@ -305,7 +327,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                                       List<ExamEnrollment> enrollments,
                                       Map<Long, List<ExamSubmission>> submissionsByEnrollment,
                                       Map<Long, Account> accountMap,
-                                      Map<Long, AssessmentReport> reportMap,
+                                      Map<Long, ExamGradingResult> gradingMap,
                                       Map<Long, AssessmentReview> reviewMap) {
         int rawScoreLimit = rubricLimit(campaign);
         List<String> headers = new ArrayList<>();
@@ -317,10 +339,10 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             if (!isBlank(question.getTitle())) {
                 questionLabel += "（" + question.getTitle().trim() + "）";
             }
-            headers.add(questionLabel + " AI得分");
+            headers.add(questionLabel + " AI阅卷得分");
             headers.add(questionLabel + " 复核得分");
         }
-        headers.add("AI总分");
+        headers.add("AI阅卷总分");
         headers.add("复核总分");
         headers.add("最终成绩（80%）");
 
@@ -378,11 +400,10 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                 boolean hasFinalScore = false;
                 for (ExamQuestion question : questions) {
                     ExamSubmission submission = submissionByQuestion.get(question.getId());
-                    AssessmentReport report = submission == null ? null : reportMap.get(submission.getId());
+                    ExamGradingResult grading = submission == null ? null : gradingMap.get(submission.getId());
                     AssessmentReview review = submission == null ? null : reviewMap.get(submission.getId());
                     int questionScore = questionLimit(question, rawScoreLimit);
-                    Integer aiScore = report == null || report.getTotalScore() == null ? null
-                            : convertedScore(report.getTotalScore(), rawScoreLimit, questionScore);
+                    Integer aiScore = gradingQuestionScore(grading, questionScore);
                     Integer finalScore = finalScoreForQuestion(review, rawScoreLimit, questionScore);
                     setScoreCell(row, column++, aiScore, scoreStyle);
                     setScoreCell(row, column++, finalScore, scoreStyle);
@@ -458,9 +479,9 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             Tenant tenant = enrollment == null ? null : tenantMapper.selectById(enrollment.getTenantId());
             AgentDefinition agent = submission.getAgentId() == null
                     ? null : agentDefinitionMapper.selectById(submission.getAgentId());
-            AssessmentReport report = reportMapper.selectOne(new LambdaQueryWrapper<AssessmentReport>()
-                    .eq(AssessmentReport::getSubmissionId, submissionId)
-                    .orderByDesc(AssessmentReport::getCreatedAt)
+            ExamGradingResult grading = gradingResultMapper.selectOne(new LambdaQueryWrapper<ExamGradingResult>()
+                    .eq(ExamGradingResult::getSubmissionId, submissionId)
+                    .orderByDesc(ExamGradingResult::getCreatedAt)
                     .last("limit 1"));
             AssessmentReview review = reviewMapper.selectOne(new LambdaQueryWrapper<AssessmentReview>()
                     .eq(AssessmentReview::getSubmissionId, submissionId)
@@ -488,6 +509,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             vo.setLoginName(account == null ? null : account.getUsername());
             vo.setEmail(account == null ? null : account.getEmail());
             vo.setTenantName(tenant == null ? null : tenant.getName());
+            vo.setTenantId(enrollment == null ? null : enrollment.getTenantId());
             vo.setCandidateName(candidateName(text(applicant, "name"), enrollment, account, campaign));
             vo.setIdentityNumber(text(applicant, "identityNumber"));
             vo.setPhone(text(applicant, "phone"));
@@ -522,19 +544,17 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             vo.setQuestionCount(1);
             vo.setSubmittedQuestionCount(1);
             vo.setTotalLimit(questionScore);
-            if (report != null) {
-                vo.setAiTotalScore(report.getTotalScore() == null ? null
-                        : ExamScoreConverter.toQuestionScore(report.getTotalScore(), rawScoreLimit, questionScore));
-                vo.setAiScoredQuestionCount(report.getTotalScore() == null ? 0 : 1);
-                vo.setConfidence(report.getConfidence());
-                vo.setModelName(report.getModelName());
-                vo.setAiScoredAt(report.getCreatedAt());
-                JsonNode reportJson = parseFormJson(report.getReportJson());
-                vo.setDimensionScores(readIntMap(reportJson.path("dimensionScores")));
-                vo.setConclusion(text(reportJson, "conclusion"));
-                vo.setEvidence(readEvidence(reportJson.path("evidence")));
-                vo.setRisks(readTextList(reportJson.path("risks")));
-                vo.setSuggestions(readTextList(reportJson.path("suggestions")));
+            if (grading != null) {
+                vo.setAiTotalScore(gradingQuestionScore(grading, questionScore));
+                vo.setAiScoredQuestionCount(grading.getTotalScore() == null ? 0 : 1);
+                vo.setConfidence(grading.getConfidence());
+                vo.setModelName(grading.getModelName());
+                vo.setAiScoredAt(grading.getCreatedAt());
+                JsonNode reportJson = parseFormJson(grading.getReportJson());
+                vo.setDimensionScores(gradingDimensionScores(reportJson));
+                vo.setConclusion(text(reportJson, "summary"));
+                vo.setEvidence(gradingEvidence(reportJson));
+                vo.setRisks(gradingRisks(reportJson));
             }
             if (review != null) {
                 vo.setFinalScore(finalScoreForQuestion(review, rawScoreLimit, questionScore));
@@ -544,7 +564,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             }
             vo.setQuestions(List.of(buildQuestionScore(submission,
                     questionNumber(question, question == null ? List.of() : List.of(question), 1),
-                    question, agent, report, review, rawScoreLimit)));
+                    question, agent, grading, review, rawScoreLimit)));
             return vo;
         } finally {
             TenantUtils.clearIgnoreTenant();
@@ -586,7 +606,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             Map<Long, AgentDefinition> agentMap = agentIds.isEmpty() ? Map.of() : agentDefinitionMapper.selectList(
                             new LambdaQueryWrapper<AgentDefinition>().in(AgentDefinition::getId, agentIds))
                     .stream().collect(Collectors.toMap(AgentDefinition::getId, Function.identity()));
-            Map<Long, AssessmentReport> reportMap = loadLatestReports(submissionIds);
+            Map<Long, ExamGradingResult> gradingMap = loadLatestGradingResults(submissionIds);
             Map<Long, AssessmentReview> reviewMap = loadLatestReviews(submissionIds);
             int rawScoreLimit = rubricLimit(campaign);
             int totalLimit = totalQuestionLimit(submissions, questions, questionMap, rawScoreLimit);
@@ -605,10 +625,13 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             vo.setLoginName(account == null ? null : account.getUsername());
             vo.setEmail(account == null ? null : account.getEmail());
             vo.setTenantName(tenant == null ? null : tenant.getName());
+            vo.setTenantId(enrollment == null ? null : enrollment.getTenantId());
             vo.setCandidateName(candidateName(identity.applicantName(), enrollment, account, campaign));
             vo.setIdentityNumber(identity.identityNumber());
             vo.setPhone(identity.phone());
             vo.setOrganization(firstNonBlank(identity.organization(), enrollment.getOrganization()));
+            vo.setTheoryScore(enrollment.getTheoryScore());
+            vo.setPracticalScore(enrollment.getPracticalScore());
             vo.setQuestionCount(Math.max(questions.size(), submissions.size()));
             vo.setSubmittedQuestionCount(submissions.size());
             vo.setTotalLimit(totalLimit);
@@ -629,7 +652,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                 questionDetails.add(buildQuestionScore(submission,
                         questionNumber(question, questions, i + 1), question,
                         submission.getAgentId() == null ? null : agentMap.get(submission.getAgentId()),
-                        reportMap.get(submission.getId()), reviewMap.get(submission.getId()), rawScoreLimit));
+                        gradingMap.get(submission.getId()), reviewMap.get(submission.getId()), rawScoreLimit));
             }
             vo.setQuestions(questionDetails);
 
@@ -674,15 +697,152 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
                 .collect(Collectors.groupingBy(ExamQuestion::getCampaignId, LinkedHashMap::new, Collectors.toList()));
     }
 
-    private Map<Long, AssessmentReport> loadLatestReports(List<Long> submissionIds) {
+    /** 每份答卷最新一次 AI 阅卷结果（config-v1 量表）。 */
+    private Map<Long, ExamGradingResult> loadLatestGradingResults(List<Long> submissionIds) {
         if (submissionIds.isEmpty()) return Map.of();
-        return reportMapper.selectList(new LambdaQueryWrapper<AssessmentReport>()
-                        .in(AssessmentReport::getSubmissionId, submissionIds)
-                        .orderByDesc(AssessmentReport::getCreatedAt))
+        return gradingResultMapper.selectList(new LambdaQueryWrapper<ExamGradingResult>()
+                        .in(ExamGradingResult::getSubmissionId, submissionIds)
+                        .orderByDesc(ExamGradingResult::getCreatedAt))
                 .stream()
-                .filter(report -> report.getSubmissionId() != null)
-                .collect(Collectors.toMap(AssessmentReport::getSubmissionId, Function.identity(),
+                .filter(result -> result.getSubmissionId() != null)
+                .collect(Collectors.toMap(ExamGradingResult::getSubmissionId, Function.identity(),
                         (first, ignored) -> first, LinkedHashMap::new));
+    }
+
+    /**
+     * AI 阅卷分（配置量表）折算为题目分值：totalScore / configMaxScore × questionScore。
+     * 返回 null 表示该题尚未完成 AI 阅卷。
+     */
+    private Integer gradingQuestionScore(ExamGradingResult grading, int questionScore) {
+        if (grading == null || grading.getTotalScore() == null) return null;
+        BigDecimal total = grading.getTotalScore();
+        BigDecimal max = grading.getConfigMaxScore();
+        if (max == null || max.signum() <= 0) {
+            return (int) Math.round(total.doubleValue());
+        }
+        double bounded = Math.max(0, Math.min(total.doubleValue(), max.doubleValue()));
+        return (int) Math.round(bounded * questionScore / max.doubleValue());
+    }
+
+    /** 阅卷分项（items: name/score/max/evidence）→ 维度得分。 */
+    private Map<String, Integer> gradingDimensionScores(JsonNode reportJson) {
+        Map<String, Integer> scores = new LinkedHashMap<>();
+        JsonNode items = reportJson.path("items");
+        if (items.isArray()) {
+            items.forEach(item -> {
+                String name = text(item, "name");
+                if (!isBlank(name) && item.path("score").isNumber()) {
+                    scores.put(name, item.path("score").asInt());
+                }
+            });
+        }
+        return scores;
+    }
+
+    /** 阅卷分项证据 → 按评分项分组的评分依据。 */
+    private List<ExamSubmissionDetailVO.SubmissionDimEvidenceVO> gradingEvidence(JsonNode reportJson) {
+        List<ExamSubmissionDetailVO.SubmissionDimEvidenceVO> evidence = new ArrayList<>();
+        JsonNode items = reportJson.path("items");
+        if (items.isArray()) {
+            items.forEach(item -> {
+                String content = text(item, "evidence");
+                if (!isBlank(content)) {
+                    ExamSubmissionDetailVO.SubmissionDimEvidenceVO vo =
+                            new ExamSubmissionDetailVO.SubmissionDimEvidenceVO();
+                    vo.setDimension(firstNonBlank(text(item, "name"), "评分项"));
+                    vo.setContent(content);
+                    evidence.add(vo);
+                }
+            });
+        }
+        return evidence;
+    }
+
+    /** 阅卷的主导权封顶与扣分原因 → 风险提示。 */
+    private List<String> gradingRisks(JsonNode reportJson) {
+        List<String> risks = new ArrayList<>();
+        String capStatus = text(reportJson, "capStatus");
+        if (!isBlank(capStatus)) risks.add("主导权封顶：" + capStatus);
+        String deductionReason = text(reportJson, "deductionReason");
+        if (!isBlank(deductionReason)) risks.add("扣分原因：" + deductionReason);
+        return risks;
+    }
+
+    /** 阅卷分项（items: name/score/max/evidence）→ 带满分与依据的评分项明细。 */
+    private List<ExamSubmissionDetailVO.GradingDimItemVO> gradingDimensionItems(JsonNode reportJson) {
+        List<ExamSubmissionDetailVO.GradingDimItemVO> result = new ArrayList<>();
+        JsonNode items = reportJson.path("items");
+        if (items.isArray()) {
+            items.forEach(item -> {
+                String name = text(item, "name");
+                if (isBlank(name) || !item.path("score").isNumber()) {
+                    return;
+                }
+                ExamSubmissionDetailVO.GradingDimItemVO vo =
+                        new ExamSubmissionDetailVO.GradingDimItemVO();
+                vo.setDimension(name);
+                vo.setScore(item.path("score").decimalValue());
+                if (item.path("max").isNumber()) {
+                    vo.setMax(item.path("max").decimalValue());
+                }
+                vo.setEvidence(text(item, "evidence"));
+                result.add(vo);
+            });
+        }
+        return result;
+    }
+
+    /** 阅卷主导权判定通道（dominanceChannels: channel/finding/evidence）。 */
+    private List<ExamSubmissionDetailVO.GradingChannelVO> gradingChannels(JsonNode reportJson) {
+        List<ExamSubmissionDetailVO.GradingChannelVO> result = new ArrayList<>();
+        JsonNode channels = reportJson.path("dominanceChannels");
+        if (channels.isArray()) {
+            channels.forEach(channel -> {
+                ExamSubmissionDetailVO.GradingChannelVO vo =
+                        new ExamSubmissionDetailVO.GradingChannelVO();
+                vo.setChannel(text(channel, "channel"));
+                vo.setFinding(text(channel, "finding"));
+                vo.setEvidence(text(channel, "evidence"));
+                result.add(vo);
+            });
+        }
+        return result;
+    }
+
+    /** 读取 JSON 数组中的字符串列表（忽略空值）。 */
+    private List<String> stringList(JsonNode node) {
+        if (!node.isArray()) return List.of();
+        List<String> values = new ArrayList<>();
+        node.forEach(item -> {
+            if (item.isTextual() && !isBlank(item.asText())) {
+                values.add(item.asText());
+            }
+        });
+        return values;
+    }
+
+    /** 填充 AI 阅卷报告的完整评价内容（评语/清单/标记/主导权/封顶/扣分）。 */
+    private void fillGradingReport(ExamSubmissionDetailVO.QuestionScoreVO vo, JsonNode reportJson) {
+        vo.setDimensionItems(gradingDimensionItems(reportJson));
+        vo.setPlainComment(text(reportJson, "plainComment"));
+        JsonNode checklistHits = reportJson.path("checklistHits");
+        if (checklistHits.isNumber()) {
+            vo.setChecklistHits(checklistHits.asInt());
+        }
+        vo.setChecklistDetail(stringList(reportJson.path("checklistDetail")));
+        vo.setIntegrityFlags(stringList(reportJson.path("integrityFlags")));
+        vo.setDominanceStatus(text(reportJson, "dominanceStatus"));
+        vo.setDominanceChannels(gradingChannels(reportJson));
+        JsonNode capRatio = reportJson.path("capRatio");
+        if (capRatio.isNumber()) {
+            vo.setCapRatio(capRatio.decimalValue());
+        }
+        vo.setCapStatus(text(reportJson, "capStatus"));
+        JsonNode deductionAmount = reportJson.path("deductionAmount");
+        if (deductionAmount.isNumber()) {
+            vo.setDeductionAmount(deductionAmount.decimalValue());
+        }
+        vo.setDeductionReason(text(reportJson, "deductionReason"));
     }
 
     private Map<Long, AssessmentReview> loadLatestReviews(List<Long> submissionIds) {
@@ -780,7 +940,7 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             int questionNo,
             ExamQuestion question,
             AgentDefinition agent,
-            AssessmentReport report,
+            ExamGradingResult grading,
             AssessmentReview review,
             int rawScoreLimit) {
         JsonNode form = parseFormJson(submission.getFormJson());
@@ -824,19 +984,21 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
         vo.setSupplementaryFiles(readFiles(materials.path("supplementaryFiles")));
         vo.setRawScoreLimit(rawScoreLimit);
 
-        if (report != null) {
-            vo.setAiRawScore(report.getTotalScore());
-            vo.setAiScore(report.getTotalScore() == null ? null
-                    : convertedScore(report.getTotalScore(), rawScoreLimit, vo.getQuestionScore()));
-            vo.setConfidence(report.getConfidence());
-            vo.setModelName(report.getModelName());
-            vo.setAiScoredAt(report.getCreatedAt());
-            JsonNode reportJson = parseFormJson(report.getReportJson());
-            vo.setDimensionScores(readIntMap(reportJson.path("dimensionScores")));
-            vo.setConclusion(text(reportJson, "conclusion"));
-            vo.setEvidence(readEvidence(reportJson.path("evidence")));
-            vo.setRisks(readTextList(reportJson.path("risks")));
-            vo.setSuggestions(readTextList(reportJson.path("suggestions")));
+        if (grading != null) {
+            vo.setAiScore(gradingQuestionScore(grading, vo.getQuestionScore()));
+            vo.setAiRawScore(grading.getTotalScore() == null ? null
+                    : grading.getTotalScore().setScale(0, RoundingMode.HALF_UP).intValue());
+            vo.setAiMaxScore(grading.getConfigMaxScore() == null ? null
+                    : grading.getConfigMaxScore().setScale(0, RoundingMode.HALF_UP).intValue());
+            vo.setConfidence(grading.getConfidence());
+            vo.setModelName(grading.getModelName());
+            vo.setAiScoredAt(grading.getCreatedAt());
+            JsonNode reportJson = parseFormJson(grading.getReportJson());
+            vo.setDimensionScores(gradingDimensionScores(reportJson));
+            vo.setConclusion(text(reportJson, "summary"));
+            vo.setEvidence(gradingEvidence(reportJson));
+            vo.setRisks(gradingRisks(reportJson));
+            fillGradingReport(vo, reportJson);
         }
         if (review != null) {
             if (!isQuestionScoreReview(review)) {
@@ -892,6 +1054,8 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
      */
     private boolean hasSubmittedWork(ExamSubmission submission) {
         if (submission == null) return false;
+        // 未作答的超时收卷记录直接排除
+        if ("NO_ANSWER".equals(submission.getStatus())) return false;
         if (submission.getAgentId() != null) return true;
         JsonNode work = parseFormJson(submission.getFormJson()).path("work");
         return !isBlank(text(work, "title"))
@@ -1021,8 +1185,13 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void saveFinalScore(Long submissionId, Integer finalScore, String comment, Long reviewerId) {
+        saveFinalScore(submissionId, finalScore, comment, reviewerId, SOURCE_MANUAL);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void saveFinalScore(Long submissionId, Integer finalScore, String comment, Long reviewerId, String source) {
         // 成绩复核面向平台管理员，提交记录属于考生租户；保存时必须与详情查询一样跨租户处理。
         TenantUtils.setIgnoreTenant();
         try {
@@ -1046,7 +1215,8 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             }
             AssessmentReview review = reviewMapper.selectOne(new LambdaQueryWrapper<AssessmentReview>()
                     .eq(AssessmentReview::getSubmissionId, submissionId));
-            if (review == null) {
+            boolean existed = review != null;
+            if (!existed) {
                 review = new AssessmentReview();
                 review.setSubmissionId(submissionId);
                 // 新建复核记录跟随作品租户，避免后续按租户查询时丢失。
@@ -1054,16 +1224,267 @@ public class ExamReviewerScoreServiceImpl implements ExamReviewerScoreService {
             }
             review.setReviewerAccountId(reviewerId);
             review.setTotalScore(finalScore);
-            review.setChecklistJson("{\"scoreMode\":\"QUESTION_SCORE\"}");
-            review.setComment(comment == null ? "" : comment.trim());
+            review.setChecklistJson(buildScoreMetaJson(source));
+            // 人工复核弹窗可能不带意见，此时保留已有的 AI 阅卷评语，避免唯一溯源信息被清空。
+            String trimmedComment = comment == null ? "" : comment.trim();
+            if (!trimmedComment.isEmpty() || !existed) {
+                review.setComment(trimmedComment);
+            }
             review.setStatus("PUBLISHED");
             if (review.getId() == null) {
                 reviewMapper.insert(review);
             } else {
                 reviewMapper.updateById(review);
             }
+
+            // 复核分必须同步落到 assessment_result：考生查分读取的是这张表，
+            // 只写 assessment_review 会导致管理员看到分数、考生一直显示「尚未录入」。
+            upsertFinalResult(submission, finalScore, questionScore, campaign, reviewerId);
+            if (!"PUBLISHED".equals(submission.getStatus())) {
+                submission.setStatus("PUBLISHED");
+                submissionMapper.updateById(submission);
+            }
         } finally {
             TenantUtils.clearIgnoreTenant();
         }
+    }
+
+    /** 写入或更新最终成绩记录，使考生查分链路可读到本次复核结果。 */
+    private void upsertFinalResult(ExamSubmission submission, int finalScore, int questionScore,
+                                   ExamCampaign campaign, Long reviewerId) {
+        AssessmentResult result = resultMapper.selectOne(new LambdaQueryWrapper<AssessmentResult>()
+                .eq(AssessmentResult::getSubmissionId, submission.getId()));
+        if (result == null) {
+            result = new AssessmentResult();
+            result.setSubmissionId(submission.getId());
+            result.setTenantId(submission.getTenantId());
+            result.setVersion(1);
+        } else {
+            result.setVersion((result.getVersion() == null ? 0 : result.getVersion()) + 1);
+        }
+        result.setFinalScore(finalScore);
+        result.setLevel(levelOfQuestionScore(finalScore, questionScore, campaign));
+        result.setPublishedBy(reviewerId);
+        result.setPublishedAt(LocalDateTime.now());
+        if (result.getId() == null) {
+            resultMapper.insert(result);
+        } else {
+            resultMapper.updateById(result);
+        }
+    }
+
+    /** 等级按归一化百分制判定；直接拿本题分（如 20）比 100 分制阈值会被全部判成 FAIL。 */
+    private String levelOfQuestionScore(int score, int questionScore, ExamCampaign campaign) {
+        AssessmentRubric rubric = AssessmentRubric.fromCampaignConfig(campaign == null ? null : campaign.getConfigJson());
+        int normalized = questionScore > 0
+                ? BigDecimal.valueOf(score).multiply(BigDecimal.valueOf(100))
+                        .divide(BigDecimal.valueOf(questionScore), 0, RoundingMode.HALF_UP).intValue()
+                : score;
+        normalized = Math.max(0, Math.min(100, normalized));
+        try {
+            return rubric.levelOf(normalized);
+        } catch (IllegalArgumentException ex) {
+            return normalized >= 60 ? "PASS" : "FAIL";
+        }
+    }
+
+    private String buildScoreMetaJson(String source) {
+        String resolved = source == null || source.isBlank() ? SOURCE_MANUAL : source.trim();
+        return "{\"scoreMode\":\"QUESTION_SCORE\",\"source\":\"" + resolved + "\"}";
+    }
+
+    /** 身份证号 / 手机号脱敏：保留前 3 位与后 4 位，中间打码。 */
+    private String maskSensitive(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() <= 7) {
+            return "****";
+        }
+        return trimmed.substring(0, 3) + "****" + trimmed.substring(trimmed.length() - 4);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void saveTheoryScore(Long enrollmentId, Integer theoryScore) {
+        TenantUtils.setIgnoreTenant();
+        try {
+            ExamEnrollment enrollment = enrollmentMapper.selectById(enrollmentId);
+            if (enrollment == null) {
+                throw new IllegalArgumentException("考生报名记录不存在");
+            }
+            validateTheoryScore(theoryScore);
+            enrollment.setTheoryScore(theoryScore);
+            enrollmentMapper.updateById(enrollment);
+        } finally {
+            TenantUtils.clearIgnoreTenant();
+        }
+    }
+
+    private void validateTheoryScore(Integer theoryScore) {
+        if (theoryScore == null) {
+            return;
+        }
+        if (theoryScore < 0 || theoryScore > THEORY_SCORE_MAX) {
+            throw new IllegalArgumentException("理论分必须在 0 到 " + THEORY_SCORE_MAX + " 之间");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchSaveTheoryScore(Long campaignId, Map<Long, Integer> scores) {
+        if (campaignId == null) {
+            throw new IllegalArgumentException("请指定考试场次");
+        }
+        if (scores == null || scores.isEmpty()) {
+            return 0;
+        }
+        TenantUtils.setIgnoreTenant();
+        try {
+            ExamCampaign campaign = campaignMapper.selectById(campaignId);
+            if (campaign == null) {
+                throw new IllegalArgumentException("考试批次不存在");
+            }
+            List<Long> enrollmentIds = scores.keySet().stream().filter(Objects::nonNull).toList();
+            if (enrollmentIds.isEmpty()) {
+                return 0;
+            }
+            Map<Long, ExamEnrollment> enrollmentMap = enrollmentMapper.selectList(
+                            new LambdaQueryWrapper<ExamEnrollment>()
+                                    .eq(ExamEnrollment::getCampaignId, campaignId)
+                                    .in(ExamEnrollment::getId, enrollmentIds))
+                    .stream().collect(Collectors.toMap(ExamEnrollment::getId, Function.identity(),
+                            (first, ignored) -> first, HashMap::new));
+            int updated = 0;
+            for (Map.Entry<Long, Integer> entry : scores.entrySet()) {
+                ExamEnrollment enrollment = enrollmentMap.get(entry.getKey());
+                if (enrollment == null) {
+                    continue;
+                }
+                validateTheoryScore(entry.getValue());
+                enrollment.setTheoryScore(entry.getValue());
+                enrollmentMapper.updateById(enrollment);
+                updated++;
+            }
+            return updated;
+        } finally {
+            TenantUtils.clearIgnoreTenant();
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ExamScorePublishVO publishCampaignScores(Long campaignId, Long operatorId, boolean force) {
+        if (campaignId == null) {
+            throw new IllegalArgumentException("请指定考试场次");
+        }
+        TenantUtils.setIgnoreTenant();
+        try {
+            ExamCampaign campaign = campaignMapper.selectById(campaignId);
+            if (campaign == null) {
+                throw new IllegalArgumentException("考试批次不存在");
+            }
+            if (ExamCampaignTiming.state(campaign, LocalDateTime.now()) != ExamCampaignTiming.State.ENDED) {
+                throw new IllegalArgumentException("考试尚未结束，不能发布成绩");
+            }
+            List<ExamEnrollment> enrollments = enrollmentMapper.selectList(new LambdaQueryWrapper<ExamEnrollment>()
+                    .eq(ExamEnrollment::getCampaignId, campaignId)
+                    .eq(ExamEnrollment::getStatus, "REGISTERED")
+                    .apply("del_flag = 0"));
+            Map<Long, List<ExamSubmission>> submissionsByEnrollment = new LinkedHashMap<>();
+            List<Long> enrollmentIds = enrollments.stream().map(ExamEnrollment::getId)
+                    .filter(Objects::nonNull).toList();
+            if (!enrollmentIds.isEmpty()) {
+                submissionMapper.selectList(new LambdaQueryWrapper<ExamSubmission>()
+                                .in(ExamSubmission::getEnrollmentId, enrollmentIds)
+                                .ne(ExamSubmission::getStatus, "DRAFT")
+                                .apply("del_flag = 0"))
+                        .forEach(submission -> {
+                            if (submission.getEnrollmentId() != null) {
+                                submissionsByEnrollment.computeIfAbsent(submission.getEnrollmentId(),
+                                        ignored -> new ArrayList<>()).add(submission);
+                            }
+                        });
+            }
+            Map<Long, ExamQuestion> questionMap = questionMapper.selectList(
+                            new LambdaQueryWrapper<ExamQuestion>().eq(ExamQuestion::getCampaignId, campaignId))
+                    .stream().collect(Collectors.toMap(ExamQuestion::getId, Function.identity(),
+                            (first, ignored) -> first, HashMap::new));
+            Map<Long, AssessmentReview> reviewMap = loadReviewsBySubmission(
+                    submissionsByEnrollment.values().stream().flatMap(List::stream)
+                            .map(ExamSubmission::getId).filter(Objects::nonNull).toList());
+
+            int rawLimit = rubricLimit(campaign);
+            Map<Long, Integer> practicalByEnrollment = new LinkedHashMap<>();
+            int skipped = 0;
+            int pending = 0;
+            for (ExamEnrollment enrollment : enrollments) {
+                List<ExamSubmission> submissions = submissionsByEnrollment
+                        .getOrDefault(enrollment.getId(), List.of());
+                if (submissions.isEmpty()) {
+                    skipped++;
+                    continue;
+                }
+                int total = 0;
+                int reviewed = 0;
+                for (ExamSubmission submission : submissions) {
+                    AssessmentReview review = reviewMap.get(submission.getId());
+                    if (isReviewed(review)) {
+                        reviewed++;
+                    }
+                    ExamQuestion question = submission.getQuestionId() == null
+                            ? null : questionMap.get(submission.getQuestionId());
+                    Integer score = finalScoreForQuestion(review, rawLimit, questionLimit(question, rawLimit));
+                    if (score != null) {
+                        total += score;
+                    }
+                }
+                if (reviewed < submissions.size()) {
+                    pending++;
+                }
+                if (reviewed > 0) {
+                    practicalByEnrollment.put(enrollment.getId(), total);
+                } else {
+                    skipped++;
+                }
+            }
+            if (!force && pending > 0) {
+                throw new IllegalArgumentException("还有 " + pending + " 位考生存在未复核的作品，"
+                        + "请先完成复核；确需提前发布请勾选强制发布。");
+            }
+
+            // 只覆盖本场确有复核记录的考生；未复核的保留原值（可能是手工录入的历史分），
+            // 不能因为一次发布就把别人的成绩清空。
+            for (ExamEnrollment enrollment : enrollments) {
+                Integer practical = practicalByEnrollment.get(enrollment.getId());
+                if (practical != null) {
+                    enrollment.setPracticalScore(practical);
+                    enrollmentMapper.updateById(enrollment);
+                }
+            }
+            campaignAdminService.updateScoreQueryEnabled(campaignId, true);
+
+            ExamScorePublishVO vo = new ExamScorePublishVO();
+            vo.setCampaignId(campaignId);
+            vo.setEnrollmentCount(enrollments.size());
+            vo.setPublishedCount(practicalByEnrollment.size());
+            vo.setSkippedCount(skipped);
+            vo.setPendingReviewCount(pending);
+            vo.setScoreQueryEnabled(true);
+            return vo;
+        } finally {
+            TenantUtils.clearIgnoreTenant();
+        }
+    }
+
+    private Map<Long, AssessmentReview> loadReviewsBySubmission(List<Long> submissionIds) {
+        if (submissionIds.isEmpty()) {
+            return Map.of();
+        }
+        return reviewMapper.selectList(new LambdaQueryWrapper<AssessmentReview>()
+                        .in(AssessmentReview::getSubmissionId, submissionIds))
+                .stream().collect(Collectors.toMap(AssessmentReview::getSubmissionId, Function.identity(),
+                        (first, ignored) -> first, HashMap::new));
     }
 }

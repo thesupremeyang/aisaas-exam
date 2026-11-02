@@ -131,7 +131,7 @@ public class CreatorAgentAdminController {
     }
 
     private void requirePlatformAdmin() {
-        if (!"admin".equalsIgnoreCase(UserUtils.getAccount())) {
+        if (!UserUtils.isPlatformAdmin()) {
             throw new SecurityException("仅平台 admin 可配置小图");
         }
     }

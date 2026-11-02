@@ -104,12 +104,12 @@ function handleFileChange(event: Event) {
  */
 function validateAndSetFile(file: File) {
   if (!file.name.endsWith('.zip')) {
-    message.error('仅支持 .zip 格式的压缩包')
+    message.warning('仅支持 .zip 格式的压缩包')
     return
   }
   const maxSize = 100 * 1024 * 1024 // 100MB
   if (file.size > maxSize) {
-    message.error('压缩包大小不能超过 100MB')
+    message.warning('压缩包大小不能超过 100MB')
     return
   }
   uploadFile.value = file

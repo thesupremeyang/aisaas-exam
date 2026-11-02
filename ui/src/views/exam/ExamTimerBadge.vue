@@ -4,6 +4,7 @@ import dayjs from 'dayjs'
 import { Modal } from 'ant-design-vue'
 import { getCandidateProgress, type CandidateProgress } from '@/api/exam'
 import { useAccountStore } from '@/stores'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
 
 const accountStore = useAccountStore()
 const timing = ref<CandidateProgress | null>(null)
@@ -19,7 +20,7 @@ let expiredEmitted = false
 let lastState: 'WAITING' | 'OPEN' | 'ENDED' | null = null
 
 const isPlatformAdmin = computed(
-  () => accountStore.userInfo?.username?.toLowerCase() === 'admin',
+  () => isPlatformAdminUsername(accountStore.userInfo?.username),
 )
 
 function parseTime(value?: string): number | null {
@@ -162,7 +163,9 @@ onBeforeUnmount(() => {
 .exam-timer-badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  height: 34px;
   min-height: 34px;
   padding: 0 12px;
   border: 1px solid #cfe0ff;
@@ -171,6 +174,7 @@ onBeforeUnmount(() => {
   color: #245da9;
   font-size: 12px;
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
 .exam-timer-badge strong {
@@ -232,11 +236,18 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .exam-timer-badge {
     gap: 5px;
-    padding: 0 9px;
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 12px;
+    max-width: 118px;
   }
 
   .exam-timer-label {
     display: none;
+  }
+
+  .exam-timer-badge strong {
+    font-size: 13px;
   }
 }
 </style>

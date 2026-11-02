@@ -1,19 +1,32 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { message, Modal } from 'ant-design-vue'
+import { useAccountStore } from '@/stores'
 import {
   exportReviewerScores,
   getEnrollmentScoreDetail,
   listExamCampaignsForAdmin,
   listReviewerScores,
+  publishCampaignScores,
   saveReviewerScore,
+  saveTheoryScore,
   type ExamCampaign,
   type ExamQuestionScore,
   type ExamScoreRow,
   type ExamSubmissionDetail,
 } from '@/api/exam'
 import { normalizeCommunicationUrl } from '@/utils/communication'
+import {
+  campaignState,
+  campaignStateLabel,
+  isPendingScorePublish,
+  isScoreQueryEnabled,
+} from '@/views/exam/campaignState'
 
+const route = useRoute()
+const router = useRouter()
+const accountStore = useAccountStore()
 const loading = ref(false)
 const rows = ref<ExamScoreRow[]>([])
 const nameFilter = ref('')
@@ -21,19 +34,78 @@ const campaigns = ref<ExamCampaign[]>([])
 const campaignLoading = ref(false)
 const selectedCampaignId = ref<string>()
 const exporting = ref(false)
+const publishing = ref(false)
+
+const selectedCampaign = computed(() =>
+  campaigns.value.find((campaign) => String(campaign.id) === String(selectedCampaignId.value)),
+)
+const selectedStateLabel = computed(() => {
+  if (!selectedCampaign.value) return null
+  return campaignStateLabel(campaignState(selectedCampaign.value, Date.now()))
+})
+/** 已结束且未开启查分 → 显示"发布成绩"主按钮 */
+const pendingPublish = computed(() =>
+  selectedCampaign.value ? isPendingScorePublish(selectedCampaign.value, Date.now()) : false,
+)
+const scoreQueryOpen = computed(() =>
+  selectedCampaign.value ? isScoreQueryEnabled(selectedCampaign.value) : false,
+)
+
+/**
+ * 发布成绩：先把已复核的本题分固化为报名记录的实操分，再开启查分。
+ * 直接开查分开关不会搬运数据，考生端仍然读不到分数。
+ */
+async function publishScore(force = false) {
+  const campaign = selectedCampaign.value
+  if (!campaign?.id) return
+  publishing.value = true
+  try {
+    const res = await publishCampaignScores(campaign.id, force)
+    const result = res.data?.data
+    const pending = result?.pendingReviewCount ?? 0
+    const published = result?.publishedCount ?? 0
+    let text = `成绩已发布：${published} 位考生的实操分已固化，考生现在可以查分`
+    if (pending > 0) {
+      text += `；另有 ${pending} 位考生仍有未复核作品`
+    }
+    message.success(text)
+    const campaignRes = await listExamCampaignsForAdmin()
+    campaigns.value = campaignRes.data?.data || []
+  } catch (error: unknown) {
+    const msg = errorMessage(error, '发布成绩失败')
+    // 后端在仍有未复核作品时会拒绝，这里给管理员一个强制发布的出口
+    if (!force && msg.includes('未复核')) {
+      Modal.confirm({
+        title: '仍有作品未复核',
+        content: msg,
+        okText: '强制发布',
+        cancelText: '返回继续复核',
+        onOk: () => publishScore(true),
+      })
+      return
+    }
+    message.warning(msg)
+  } finally {
+    publishing.value = false
+  }
+}
 
 async function loadCampaigns() {
   campaignLoading.value = true
   try {
     const res = await listExamCampaignsForAdmin()
     campaigns.value = res.data?.data || []
-    const firstCampaign = campaigns.value[0]
-    if (!selectedCampaignId.value && firstCampaign?.id != null) {
-      selectedCampaignId.value = String(firstCampaign.id)
+    // 支持从考试场次页跳转时透传 campaignId，保持批次上下文
+    const requested = route.query.campaignId ? String(route.query.campaignId) : ''
+    const matched = campaigns.value.find((campaign) => String(campaign.id) === requested)
+    if (matched?.id != null) {
+      selectedCampaignId.value = String(matched.id)
+    } else if (!selectedCampaignId.value && campaigns.value[0]?.id != null) {
+      selectedCampaignId.value = String(campaigns.value[0].id)
     }
     await load()
   } catch {
-    message.error('加载考试场次失败')
+    message.warning('加载考试场次失败')
   } finally {
     campaignLoading.value = false
   }
@@ -52,7 +124,7 @@ async function load() {
     )
     rows.value = res.data?.data || []
   } catch {
-    message.error('加载学员成绩失败')
+    message.warning('加载学员成绩失败')
   } finally {
     loading.value = false
   }
@@ -96,7 +168,7 @@ async function exportScores() {
     window.setTimeout(() => window.URL.revokeObjectURL(url), 0)
     message.success('成绩 Excel 已导出')
   } catch (error: unknown) {
-    message.error(errorMessage(error, '导出成绩失败'))
+    message.warning(errorMessage(error, '导出成绩失败'))
   } finally {
     exporting.value = false
   }
@@ -104,6 +176,12 @@ async function exportScores() {
 
 function scoreText(score?: number, limit?: number) {
   return score == null ? '—' : `${score} / ${limit ?? 0}`
+}
+
+/** 报告里的分数可能是 3.0 这类小数，展示时去掉多余的尾零。 */
+function fmtNum(value?: number | null) {
+  if (value == null) return '—'
+  return String(Number(value))
 }
 
 function progressText(row: ExamScoreRow) {
@@ -132,6 +210,7 @@ function reviewStatusType(row: ExamScoreRow): 'success' | 'warning' | 'default' 
 const editVisible = ref(false)
 const editing = ref<ExamQuestionScore | null>(null)
 const finalScore = ref<number | null>(0)
+const editComment = ref('')
 const saving = ref(false)
 
 function openEdit(question: ExamQuestionScore) {
@@ -141,6 +220,8 @@ function openEdit(question: ExamQuestionScore) {
   }
   editing.value = question
   finalScore.value = question.finalScore ?? question.aiScore ?? 0
+  // 不预填已有评语：存量评语多为 AI 阅卷采纳内容，预填容易被误当成人工意见提交。
+  editComment.value = ''
   editVisible.value = true
 }
 
@@ -156,6 +237,30 @@ async function refreshDetail() {
   detail.value = res.data?.data || null
 }
 
+// 理论成绩：满分 100，由管理员录入，计入总成绩 20%
+const theoryScore = ref<number | null>(null)
+const theorySaving = ref(false)
+
+async function submitTheoryScore() {
+  const enrollmentId = detail.value?.enrollmentId
+  if (enrollmentId == null) return
+  const score = theoryScore.value
+  if (score != null && (score < 0 || score > 100)) {
+    message.warning('理论分需在 0 ~ 100 之间')
+    return
+  }
+  theorySaving.value = true
+  try {
+    await saveTheoryScore(enrollmentId, score)
+    message.success('理论分已保存')
+    await refreshDetail()
+  } catch (error: unknown) {
+    message.warning(errorMessage(error, '保存理论分失败'))
+  } finally {
+    theorySaving.value = false
+  }
+}
+
 async function submitEdit() {
   const submissionId = editing.value?.submissionId
   const score = finalScore.value
@@ -167,7 +272,8 @@ async function submitEdit() {
   }
   saving.value = true
   try {
-    await saveReviewerScore(submissionId, score)
+    // 意见留空时后端保留原有评语（AI 阅卷评语不会被清空）
+    await saveReviewerScore(submissionId, score, editComment.value.trim() || undefined)
     message.success('已保存最终得分')
     editVisible.value = false
     await load()
@@ -177,7 +283,7 @@ async function submitEdit() {
         detail.value?.questions?.find((question) => question.submissionId === submissionId) || null
     }
   } catch (error: unknown) {
-    message.error(errorMessage(error))
+    message.warning(errorMessage(error))
   } finally {
     saving.value = false
   }
@@ -187,6 +293,37 @@ async function submitEdit() {
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref<ExamSubmissionDetail | null>(null)
+
+// 打开抽屉时同步理论分输入框（必须在 detail 声明之后，否则会触发 TDZ 报错）
+watch(detail, (value) => {
+  theoryScore.value = value?.theoryScore ?? null
+})
+
+/** 抽屉宽度：期望 1080，但窗口不够宽时自动收窄（左右各留 44px 余量），保证按钮与操作列不被切掉 */
+const EXPECTED_DRAWER_WIDTH = 1080
+const drawerWidth = ref(Math.min(EXPECTED_DRAWER_WIDTH, window.innerWidth - 88))
+function syncDrawerWidth() {
+  drawerWidth.value = Math.min(EXPECTED_DRAWER_WIDTH, window.innerWidth - 88)
+}
+onMounted(() => window.addEventListener('resize', syncDrawerWidth))
+onBeforeUnmount(() => window.removeEventListener('resize', syncDrawerWidth))
+
+/** 进入考生配置智能体空间：切换到考生租户上下文（模拟态），智能体/知识库等全部隔离为该考生数据。 */
+async function enterCandidateSpace() {
+  const current = detail.value
+  if (!current?.tenantId) {
+    message.warning('该考生答卷缺少租户信息，无法进入')
+    return
+  }
+  try {
+    await accountStore.enterTenantView(current.tenantId, current.candidateName || '考生')
+    await router.push('/agent')
+    window.setTimeout(() => window.location.reload(), 100)
+  } catch (error) {
+    console.error(error)
+    message.error('进入考生配置空间失败')
+  }
+}
 
 async function openDetail(row: ExamScoreRow) {
   if (row.enrollmentId == null) {
@@ -199,7 +336,7 @@ async function openDetail(row: ExamScoreRow) {
     const res = await getEnrollmentScoreDetail(row.enrollmentId)
     detail.value = res.data?.data || null
   } catch {
-    message.error('加载详情失败')
+    message.warning('加载详情失败')
   } finally {
     detailLoading.value = false
   }
@@ -230,12 +367,11 @@ function fileListLabel(files?: { url?: string; name?: string }[]) {
 
 const columns = [
   { title: '姓名', dataIndex: 'candidateName', key: 'candidateName' },
-  { title: '身份证号', dataIndex: 'identityNumber', key: 'identityNumber' },
-  { title: '联系电话', dataIndex: 'phone', key: 'phone' },
+  { title: '考号', dataIndex: 'loginName', key: 'loginName' },
   { title: '所属单位 / 团队', dataIndex: 'organization', key: 'organization' },
   { title: '提交进度', key: 'submissionProgress' },
   { title: '演示地址', key: 'demoUrl' },
-  { title: 'AI 自评总分', key: 'aiTotalScore' },
+  { title: 'AI 阅卷总分', key: 'aiTotalScore' },
   { title: '最终审核总分', key: 'finalScore' },
   { title: '复核状态', key: 'reviewed' },
   { title: '最近提交时间', dataIndex: 'submittedAt', key: 'submittedAt' },
@@ -243,13 +379,12 @@ const columns = [
 ]
 
 const questionColumns = [
-  { title: '题号', key: 'questionNo', width: 64 },
-  { title: '题目', key: 'questionTitle', width: 190 },
-  { title: '智能体 / 作品', key: 'work', width: 170 },
-  { title: '演示地址', key: 'demoUrl', width: 100 },
-  { title: 'AI 自评', key: 'aiScore', width: 110 },
-  { title: '最终审核', key: 'finalScore', width: 110 },
-  { title: '操作', key: 'action', width: 116 },
+  { title: '题号', key: 'questionNo', width: 70 },
+  { title: '题目', key: 'questionTitle', width: 300 },
+  { title: '智能体 / 作品', key: 'work', width: 220 },
+  { title: 'AI 阅卷得分', key: 'aiScore', width: 150 },
+  { title: '复核得分', key: 'finalScore', width: 150 },
+  { title: '操作', key: 'action', width: 130 },
 ]
 
 onMounted(loadCampaigns)
@@ -259,9 +394,9 @@ onMounted(loadCampaigns)
   <div class="reviewer-score-page">
     <div class="rsp-header">
       <div>
-        <h2 class="rsp-title">学员成绩复核</h2>
+        <h2 class="rsp-title">成绩与发布</h2>
         <p class="rsp-sub">
-          按学员汇总考试总分；点击演示地址、AI 自评或最终审核，可查看每道题/每个智能体的具体成绩。
+          按学员汇总考试总分；点击演示地址、AI 阅卷或最终审核，可查看每道题/每个智能体的具体成绩。
         </p>
       </div>
       <div class="rsp-search">
@@ -289,8 +424,22 @@ onMounted(loadCampaigns)
           @search="onSearch"
         />
         <a-button :disabled="!selectedCampaignId" @click="load">刷新</a-button>
+        <a-popconfirm
+          v-if="pendingPublish"
+          title="发布后已报名考生可立即查看本场成绩，确认发布吗？"
+          ok-text="发布成绩"
+          cancel-text="取消"
+          @confirm="publishScore"
+        >
+          <a-button type="primary" :loading="publishing">发布成绩（开启查分）</a-button>
+        </a-popconfirm>
+        <a-tag v-else-if="scoreQueryOpen" color="green" class="publish-tag">成绩已发布</a-tag>
+        <span v-else-if="selectedStateLabel" class="publish-hint">
+          当前状态：{{ selectedStateLabel }}，考试结束后可在此发布成绩
+        </span>
         <a-button
           type="primary"
+          ghost
           :loading="exporting"
           :disabled="!selectedCampaignId"
           @click="exportScores"
@@ -368,27 +517,33 @@ onMounted(loadCampaigns)
     <a-drawer
       v-model:open="detailVisible"
       title="学员成绩总览"
-      :width="980"
+      :width="drawerWidth"
       placement="right"
       :body-style="{ padding: '0 24px 24px' }"
     >
       <a-spin :spinning="detailLoading">
         <template v-if="detail">
-          <a-divider orientation="left">考生信息</a-divider>
+          <div class="drawer-heading">
+            <span class="heading-title">考生信息</span>
+            <div class="heading-line"></div>
+            <a-button
+              type="primary"
+              ghost
+              :disabled="!detail.tenantId"
+              @click="enterCandidateSpace"
+            >
+              进入考生配置智能体空间
+            </a-button>
+          </div>
           <a-descriptions :column="2" size="small" bordered :label-style="{ width: '108px' }">
             <a-descriptions-item label="姓名">{{
               detail.candidateName || '—'
             }}</a-descriptions-item>
-            <a-descriptions-item label="身份证号">{{
-              detail.identityNumber || '—'
+            <a-descriptions-item label="考号（登录账号）">{{
+              detail.loginName || '—'
             }}</a-descriptions-item>
-            <a-descriptions-item label="联系电话">{{ detail.phone || '—' }}</a-descriptions-item>
             <a-descriptions-item label="所属单位 / 团队">{{
               detail.organization || '—'
-            }}</a-descriptions-item>
-            <a-descriptions-item label="登录名">{{ detail.loginName || '—' }}</a-descriptions-item>
-            <a-descriptions-item label="所属租户">{{
-              detail.tenantName || '—'
             }}</a-descriptions-item>
           </a-descriptions>
 
@@ -401,16 +556,16 @@ onMounted(loadCampaigns)
               >
             </div>
             <div class="summary-item">
-              <span class="summary-label">考试总分上限</span>
+              <span class="summary-label">考试满分</span>
               <strong>{{ detail.totalLimit ?? 0 }}</strong>
             </div>
             <div class="summary-item">
-              <span class="summary-label">AI 自评总分</span>
+              <span class="summary-label">AI 阅卷总分</span>
               <strong v-if="detail.aiTotalScore != null"
                 >{{ detail.aiTotalScore }} / {{ detail.totalLimit ?? 0 }}</strong
               >
               <strong v-else class="muted">未评测</strong>
-              <small>{{ detail.aiScoredQuestionCount ?? 0 }} 题已评</small>
+              <small>{{ detail.aiScoredQuestionCount ?? 0 }} / {{ detail.submittedQuestionCount ?? 0 }} 题已评</small>
             </div>
             <div class="summary-item">
               <span class="summary-label">最终审核总分</span>
@@ -418,7 +573,7 @@ onMounted(loadCampaigns)
                 >{{ detail.finalScore }} / {{ detail.totalLimit ?? 0 }}</strong
               >
               <strong v-else class="muted">未复核</strong>
-              <small>{{ detail.reviewedQuestionCount ?? 0 }} 题已复核</small>
+              <small>{{ detail.reviewedQuestionCount ?? 0 }} / {{ detail.submittedQuestionCount ?? 0 }} 题已复核</small>
             </div>
           </div>
 
@@ -426,9 +581,34 @@ onMounted(loadCampaigns)
             type="info"
             show-icon
             message="总分说明"
-            description="AI 初评按 100 分量表折算为各题分值；最终复核分直接按各题配置的分值录入和汇总。进入题目详情可查看 AI 原始分。"
+            description="AI 阅卷总分 = 各题 AI 阅卷得分相加；最终审核总分 = 各题复核得分相加。两列分数均在下方明细表中逐题展示，点击分数可查看该题评分详情。"
             style="margin-top: 16px"
           />
+
+          <div class="drawer-heading" style="margin-top: 20px">
+            <span class="heading-title">理论成绩</span>
+            <div class="heading-line"></div>
+          </div>
+          <a-space :size="12" align="center" wrap>
+            <a-input-number
+              v-model:value="theoryScore"
+              :min="0"
+              :max="100"
+              :precision="0"
+              style="width: 160px"
+              placeholder="0 ~ 100"
+            />
+            <a-button
+              type="primary"
+              ghost
+              :loading="theorySaving"
+              :disabled="!detail.enrollmentId"
+              @click="submitTheoryScore"
+            >
+              保存理论分
+            </a-button>
+            <span class="muted">总成绩 = 理论 × 20% + 实操 × 80%</span>
+          </a-space>
 
           <a-divider orientation="left">题目 / 智能体成绩明细</a-divider>
           <a-table
@@ -439,7 +619,7 @@ onMounted(loadCampaigns)
             size="small"
             bordered
             :pagination="false"
-            :scroll="{ x: 820 }"
+            :scroll="{ x: 1020 }"
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'questionNo'">
@@ -454,14 +634,6 @@ onMounted(loadCampaigns)
               <template v-else-if="column.key === 'work'">
                 <div>{{ record.agentName || '未关联智能体' }}</div>
                 <div class="question-meta">{{ record.workName || '未填写作品名称' }}</div>
-              </template>
-              <template v-else-if="column.key === 'demoUrl'">
-                <a v-if="record.demoUrl" :href="normalizeCommunicationUrl(record.demoUrl)" target="_blank" rel="noopener"
-                  >打开演示</a
-                >
-                <a-button v-else type="link" size="small" @click="openQuestionDetail(record)"
-                  >查看详情</a-button
-                >
               </template>
               <template v-else-if="column.key === 'aiScore'">
                 <a-button
@@ -511,7 +683,7 @@ onMounted(loadCampaigns)
       v-model:open="questionDetailVisible"
       :title="selectedQuestion ? `第 ${selectedQuestion.questionNo} 题 · 评分详情` : '评分详情'"
       :footer="null"
-      width="820"
+      width="960"
     >
       <template v-if="selectedQuestion">
         <a-descriptions :column="2" size="small" bordered :label-style="{ width: '108px' }">
@@ -547,48 +719,10 @@ onMounted(loadCampaigns)
           </a-descriptions-item>
         </a-descriptions>
 
-        <a-divider orientation="left">作品提交信息</a-divider>
-        <a-descriptions :column="1" size="small" bordered :label-style="{ width: '108px' }">
-          <a-descriptions-item label="应用场景">{{
-            selectedQuestion.scene || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="功能说明">{{
-            selectedQuestion.functionDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="创新性说明">{{
-            selectedQuestion.innovationDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="推广性说明">{{
-            selectedQuestion.promotionDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="数据说明">{{
-            selectedQuestion.dataDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="运行环境">{{
-            selectedQuestion.runtimeEnvironment || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="团队分工">{{
-            selectedQuestion.teamDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="技术说明">{{
-            selectedQuestion.technicalDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="材料说明">{{
-            selectedQuestion.materialDescription || '—'
-          }}</a-descriptions-item>
-          <a-descriptions-item label="附件" :span="1">
-            截图：{{ fileListLabel(selectedQuestion.screenshotFiles) }}；视频：{{
-              fileListLabel(selectedQuestion.videoFiles)
-            }}；作品包：{{ fileListLabel(selectedQuestion.packageFiles) }}；补充材料：{{
-              fileListLabel(selectedQuestion.supplementaryFiles)
-            }}
-          </a-descriptions-item>
-        </a-descriptions>
-
-        <a-divider orientation="left">AI 自评</a-divider>
+        <a-divider orientation="left">AI 阅卷报告</a-divider>
         <div class="score-panel">
           <div class="score-panel-heading">
-            <span>本题折算分</span>
+            <span>本题得分（按题目分值折算）</span>
             <strong>{{
               selectedQuestion.aiScore != null
                 ? scoreText(selectedQuestion.aiScore, selectedQuestion.questionScore)
@@ -596,48 +730,105 @@ onMounted(loadCampaigns)
             }}</strong>
           </div>
           <div v-if="selectedQuestion.aiRawScore != null" class="raw-score-note">
-            评分量表原始分：{{ selectedQuestion.aiRawScore }} /
-            {{ selectedQuestion.rawScoreLimit ?? 100 }}
+            量表原始分：{{ selectedQuestion.aiRawScore }} /
+            {{ selectedQuestion.aiMaxScore ?? selectedQuestion.rawScoreLimit ?? 100 }}
             <span v-if="selectedQuestion.confidence">
               · 置信度：{{ selectedQuestion.confidence }}</span
             >
             <span v-if="selectedQuestion.modelName"> · 模型：{{ selectedQuestion.modelName }}</span>
           </div>
-          <div v-if="hasScores(selectedQuestion.dimensionScores)" class="dim-scores">
-            <div
-              v-for="(score, dimension) in selectedQuestion.dimensionScores"
-              :key="dimension"
-              class="dim-row"
+
+          <div v-if="selectedQuestion.plainComment" class="report-section">
+            <strong>评语：</strong>{{ selectedQuestion.plainComment }}
+          </div>
+
+          <table v-if="selectedQuestion.dimensionItems?.length" class="grading-items">
+            <thead>
+              <tr>
+                <th style="width: 26%">评分项</th>
+                <th style="width: 15%">得分</th>
+                <th>评分依据</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(item, index) in selectedQuestion.dimensionItems"
+                :key="index"
+              >
+                <td>{{ item.dimension || '—' }}</td>
+                <td class="grading-item-score">
+                  {{ fmtNum(item.score) }} / {{ fmtNum(item.max) }}
+                </td>
+                <td class="grading-item-evidence">{{ item.evidence || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div v-if="selectedQuestion.checklistDetail?.length" class="report-section">
+            <strong
+              >设计清单命中：{{ selectedQuestion.checklistHits ?? 0 }} /
+              {{ selectedQuestion.checklistDetail.length }}</strong
             >
-              <span class="dim-label">{{ dimension }}</span>
-              <div class="dim-bar-wrap">
-                <div
-                  class="dim-bar"
-                  :style="{ width: scorePercent(score, selectedQuestion.rawScoreLimit) }"
-                />
-              </div>
-              <span class="dim-score">{{ score }}</span>
-            </div>
-          </div>
-          <div v-if="selectedQuestion.conclusion" class="report-section">
-            <strong>结论：</strong>{{ selectedQuestion.conclusion }}
-          </div>
-          <div v-if="selectedQuestion.evidence?.length" class="report-section">
-            <strong>评分依据：</strong>
             <div
-              v-for="(evidence, index) in selectedQuestion.evidence"
+              v-for="(line, index) in selectedQuestion.checklistDetail"
               :key="index"
-              style="margin: 4px 0"
+              class="report-line"
             >
-              <a-tag color="blue" size="small">{{ evidence.dimension }}</a-tag
-              >{{ evidence.content }}
+              {{ line }}
             </div>
+          </div>
+
+          <div v-if="selectedQuestion.integrityFlags?.length" class="report-section">
+            <strong>完整性提示：</strong>
+            <a-tag v-for="flag in selectedQuestion.integrityFlags" :key="flag" color="orange">{{
+              flag
+            }}</a-tag>
+          </div>
+
+          <div
+            v-if="
+              selectedQuestion.dominanceStatus ||
+              selectedQuestion.capStatus ||
+              (selectedQuestion.deductionAmount != null && selectedQuestion.deductionAmount > 0)
+            "
+            class="report-section"
+          >
+            <strong>主导权 / 封顶判定：</strong>
+            <div v-if="selectedQuestion.dominanceStatus" class="report-line">
+              主导权状态：{{ selectedQuestion.dominanceStatus }}
+            </div>
+            <div v-if="selectedQuestion.capStatus" class="report-line">
+              封顶原因：{{ selectedQuestion.capStatus
+              }}<template v-if="selectedQuestion.capRatio != null"
+                >（封顶比例 {{ Math.round(selectedQuestion.capRatio * 100) }}%）</template
+              >
+            </div>
+            <div
+              v-if="selectedQuestion.deductionAmount != null && selectedQuestion.deductionAmount > 0"
+              class="report-line"
+            >
+              额外扣分：{{ fmtNum(selectedQuestion.deductionAmount)
+              }}<template v-if="selectedQuestion.deductionReason"
+                >（{{ selectedQuestion.deductionReason }}）</template
+              >
+            </div>
+            <div v-if="selectedQuestion.dominanceChannels?.length" style="margin-top: 4px">
+              <div
+                v-for="(channel, index) in selectedQuestion.dominanceChannels"
+                :key="index"
+                class="report-line"
+              >
+                通道{{ channel.channel }}：{{ channel.finding
+                }}<template v-if="channel.evidence"> —— {{ channel.evidence }}</template>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="selectedQuestion.conclusion" class="report-section">
+            <strong>阅卷小结：</strong>{{ selectedQuestion.conclusion }}
           </div>
           <div v-if="selectedQuestion.risks?.length" class="report-section">
             <strong>风险提示：</strong>{{ selectedQuestion.risks.join('；') }}
-          </div>
-          <div v-if="selectedQuestion.suggestions?.length" class="report-section">
-            <strong>改进建议：</strong>{{ selectedQuestion.suggestions.join('；') }}
           </div>
         </div>
 
@@ -696,7 +887,7 @@ onMounted(loadCampaigns)
         <a-descriptions-item label="作品">{{
           editing?.workName || editing?.agentName || '—'
         }}</a-descriptions-item>
-        <a-descriptions-item label="AI 自评">
+        <a-descriptions-item label="AI 阅卷">
           {{
             editing?.aiScore != null ? scoreText(editing.aiScore, editing.questionScore) : '未评测'
           }}
@@ -719,6 +910,15 @@ onMounted(loadCampaigns)
             :min="0"
             :max="editing?.questionScore ?? 100"
             style="width: 100%"
+          />
+        </a-form-item>
+        <a-form-item label="复核意见">
+          <a-textarea
+            v-model:value="editComment"
+            :rows="3"
+            :maxlength="500"
+            show-count
+            placeholder="可填写复核理由；留空则保留原有评语（如 AI 阅卷评语）"
           />
         </a-form-item>
       </a-form>
@@ -756,6 +956,15 @@ onMounted(loadCampaigns)
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.publish-tag {
+  margin-right: 0;
+}
+.publish-hint {
+  color: #9aa3b2;
+  font-size: 12px;
 }
 .muted,
 .question-meta,
@@ -768,8 +977,61 @@ onMounted(loadCampaigns)
   white-space: normal;
   text-align: left;
 }
+.grading-items {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.grading-items th,
+.grading-items td {
+  padding: 6px 8px;
+  border: 1px solid #edf1f7;
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.55;
+}
+.grading-items th {
+  background: #f7f9fc;
+  color: #5a6572;
+  font-weight: 600;
+}
+.grading-item-score {
+  white-space: nowrap;
+  color: #1f3b63;
+  font-weight: 600;
+}
+.grading-item-evidence {
+  color: #55606e;
+}
+.report-line {
+  margin: 3px 0;
+  color: #55606e;
+}
 .score-progress {
   font-size: 11px;
+}
+.drawer-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding-top: 16px;
+}
+.heading-title {
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.88);
+}
+.heading-line {
+  flex: 1 1 24px;
+  min-width: 24px;
+  height: 1px;
+  background: rgba(5, 5, 5, 0.08);
+}
+.drawer-heading .ant-btn {
+  flex-shrink: 0;
 }
 .summary-grid {
   display: grid;

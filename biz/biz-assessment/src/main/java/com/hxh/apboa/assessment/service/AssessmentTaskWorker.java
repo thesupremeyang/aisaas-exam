@@ -14,6 +14,7 @@ import com.hxh.apboa.common.entity.ExamCampaign;
 import com.hxh.apboa.common.entity.ExamSubmission;
 import com.hxh.apboa.common.util.TenantUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,8 +37,16 @@ public class AssessmentTaskWorker {
     private final ObjectMapper objectMapper;
     private final RuntimeAssessmentProperties runtimeProperties;
 
+    /** AI 智评屏蔽开关：false（默认）时不再消费初评队列，交卷后的初评任务不再执行。 */
+    @Value("${assessment.initial-assessment.enabled:false}")
+    private boolean initialAssessmentEnabled;
+
     @Scheduled(fixedDelayString = "${assessment.worker.fixed-delay-ms:3000}")
     public void poll() {
+        if (!initialAssessmentEnabled) {
+            // AI 智评已屏蔽：保持队列原样，历史 QUEUED 任务也不再执行。
+            return;
+        }
         // 后台定时线程无请求级租户上下文，需显式忽略租户过滤以跨租户扫描待处理任务
         TenantUtils.setIgnoreTenant();
         try {

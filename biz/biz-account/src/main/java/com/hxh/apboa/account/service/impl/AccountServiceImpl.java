@@ -91,8 +91,12 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         // 查询该用户所有 PENDING 状态的加入申请
         List<TenantJoinRequest> pendingRequests = listAccountPendingRequests(account.getId());
 
-        // 无有效租户成员 — 检查是否有待审批申请
+        // 无有效租户成员 — 平台管理员允许无租户登录（跨租户豁免由认证拦截器授予）；
+        // 普通账号检查待审批申请
         if (activeMemberships.isEmpty()) {
+            if (Boolean.TRUE.equals(account.getPlatformAdmin())) {
+                return generateTokenResponse(account, null, null, null, null);
+            }
             if (!pendingRequests.isEmpty()) {
                 // 有待审批申请，返回 blocked 状态
                 List<PendingApprovalInfo> pendingList = new ArrayList<>();
@@ -324,8 +328,9 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
             String tenantCode = null;
             TenantRole tenantRole = null;
             String tenantName = null;
+            UserDetail oldDetail = null;
             try {
-                UserDetail oldDetail = JsonUtils.parse(claims.getSubject(), UserDetail.class);
+                oldDetail = JsonUtils.parse(claims.getSubject(), UserDetail.class);
                 if (oldDetail != null && oldDetail.getTenantId() != null) {
                     tenantId = oldDetail.getTenantId();
                     tenantCode = oldDetail.getTenantCode();
@@ -333,6 +338,40 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                             ? TenantRole.valueOf(oldDetail.getTenantRole()) : null;
                 }
             } catch (Exception ignored) {}
+
+            // 管理员"进入考生配置界面"的模拟令牌：账号并非该租户的真实成员（无 account_tenant 记录），
+            // 且签发时 platformAdmin 已压为 false。刷新时必须沿用模拟身份重新签发，
+            // 否则会经 generateTokenResponse 从 DB 重查账号，签出
+            // "platformAdmin=true + 考生租户"的越权混合令牌，打破模拟态的租户隔离。
+            if (oldDetail != null && tenantId != null
+                    && !Boolean.TRUE.equals(oldDetail.getPlatformAdmin())
+                    && accountTenantService.getByAccountAndTenant(account.getId(), tenantId) == null) {
+                boolean hasNotCurrentTenant = TenantUtils.getCurrentTenantId() == null;
+                try {
+                    TenantUtils.setCurrentTenant(oldDetail.getTenantId(), oldDetail.getTenantCode());
+                    long accessTokenTtl = Long.parseLong(paramsAdapter.getValue("ACCESS_TOKEN_TTL"));
+                    long refreshTokenTtl = Long.parseLong(paramsAdapter.getValue("REFRESH_TOKEN_TTL"));
+                    String accessToken = TokenUtils.createToken(account.getId().toString(), oldDetail, accessTokenTtl);
+                    String refreshToken = TokenUtils.createToken(account.getId().toString(), oldDetail, refreshTokenTtl);
+                    String userDetailStr = JsonUtils.toJsonStr(oldDetail);
+                    redisUtils.setEx(RedisKeyBuilder.globalKey("login:" + accessToken), userDetailStr,
+                            accessTokenTtl, TimeUnit.MILLISECONDS);
+                    redisUtils.setEx(RedisKeyBuilder.globalKey("presence:" + accessToken), userDetailStr,
+                            SysConst.LOGIN_PRESENCE_TTL_MILLIS, TimeUnit.MILLISECONDS);
+                    long currentTime = System.currentTimeMillis();
+                    return LoginResponse.builder()
+                            .accessToken(accessToken)
+                            .accessTokenTTL(currentTime + accessTokenTtl)
+                            .refreshToken(refreshToken)
+                            .refreshTokenTTL(currentTime + refreshTokenTtl)
+                            .userDetail(oldDetail)
+                            .build();
+                } finally {
+                    if (hasNotCurrentTenant) {
+                        TenantUtils.clear();
+                    }
+                }
+            }
 
             // 生成新的token（保留租户上下文）
             return generateTokenResponse(account, tenantId, tenantCode, tenantRole, tenantName);
@@ -502,6 +541,113 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     }
 
     @Override
+    public boolean createPlatformAccount(PlatformAccountCreateRequest request) {
+        if (FuncUtils.isEmpty(request.getUsername()) || FuncUtils.isEmpty(request.getNickname())) {
+            throw new RuntimeException("用户名和昵称不能为空");
+        }
+        if (FuncUtils.isEmpty(request.getPassword())) {
+            throw new RuntimeException("初始密码不能为空");
+        }
+        if (this.lambdaQuery().eq(Account::getUsername, request.getUsername()).exists()) {
+            throw new RuntimeException("用户名已存在");
+        }
+        if (!FuncUtils.isEmpty(request.getEmail())
+                && this.lambdaQuery().eq(Account::getEmail, request.getEmail()).exists()) {
+            throw new RuntimeException("邮箱已被注册");
+        }
+
+        Account account = new Account();
+        account.setNickname(request.getNickname());
+        account.setUsername(request.getUsername());
+        account.setEmail(request.getEmail());
+        account.setEnabled(true);
+        account.setPlatformAdmin(Boolean.TRUE.equals(request.getPlatformAdmin()));
+        // 保存以生成 ID，再以账号 ID 为盐加密密码
+        this.save(account);
+        account.setPassword(CryptoUtils.md5(request.getPassword(), account.getId().toString()));
+        return this.updateById(account);
+    }
+
+    @Override
+    public boolean setPlatformAdmin(Long id, Boolean flag) {
+        Account account = this.getById(id);
+        if (account == null) {
+            throw new RuntimeException("用户不存在");
+        }
+        if (Objects.equals(account.getId(), SysConst.ADMIN_ACCOUNT_ID) && !Boolean.TRUE.equals(flag)) {
+            throw new RuntimeException("内置管理员账号不可取消平台管理员身份");
+        }
+        account.setPlatformAdmin(Boolean.TRUE.equals(flag));
+        return this.updateById(account);
+    }
+
+    @Override
+    public LoginResponse viewTenantAsAdmin(Long tenantId) {
+        UserDetail current = UserUtils.getUserDetail();
+        if (current == null || !UserUtils.isPlatformAdmin()) {
+            throw new RuntimeException("仅平台管理员可进入考生配置界面");
+        }
+        Account account = this.getById(current.getId());
+        if (account == null) {
+            throw new RuntimeException("管理员账号不存在");
+        }
+        if (Boolean.FALSE.equals(account.getEnabled())) {
+            throw new RuntimeException("账号已被禁用");
+        }
+        Tenant tenant = tenantMapper.selectById(tenantId);
+        if (tenant == null) {
+            throw new RuntimeException("考生租户不存在");
+        }
+
+        // 模拟令牌关键点：platformAdmin=false → 认证拦截器不做跨租户豁免，
+        // 全部页面（智能体/Skill/知识库/提示词/工具等）走考生租户隔离。
+        UserDetail userDetail = UserDetail.builder()
+                .id(account.getId())
+                .username(account.getUsername())
+                .name(account.getNickname())
+                .email(account.getEmail())
+                .platformAdmin(false)
+                .tenantId(tenant.getId())
+                .tenantCode(tenant.getCode())
+                .tenantName(tenant.getName())
+                .tenantRole(TenantRole.TENANT_OWNER.name())
+                .tenants(List.of(new UserDetail.TenantInfo(
+                        tenant.getId(), tenant.getCode(), tenant.getName(), TenantRole.TENANT_OWNER.name())))
+                .build();
+
+        boolean hasNotCurrentTenant = TenantUtils.getCurrentTenantId() == null;
+        try {
+            // 管理员请求自带跨租户豁免标记；模拟令牌签发需要在"考生租户"上下文中查系统参数，
+            // 先清除豁免标记，避免 paramsAdapter 命中多租户多行导致"不存在唯一Key"。
+            TenantUtils.clearIgnoreTenant();
+            TenantUtils.setCurrentTenant(tenant.getId(), tenant.getCode());
+            long accessTokenTtl = Long.parseLong(paramsAdapter.getValue("ACCESS_TOKEN_TTL"));
+            String accessToken = TokenUtils.createToken(account.getId().toString(), userDetail, accessTokenTtl);
+            long refreshTokenTtl = Long.parseLong(paramsAdapter.getValue("REFRESH_TOKEN_TTL"));
+            String refreshToken = TokenUtils.createToken(account.getId().toString(), userDetail, refreshTokenTtl);
+
+            String userDetailStr = JsonUtils.toJsonStr(userDetail);
+            redisUtils.setEx(RedisKeyBuilder.globalKey("login:" + accessToken), userDetailStr,
+                    accessTokenTtl, TimeUnit.MILLISECONDS);
+            redisUtils.setEx(RedisKeyBuilder.globalKey("presence:" + accessToken), userDetailStr,
+                    SysConst.LOGIN_PRESENCE_TTL_MILLIS, TimeUnit.MILLISECONDS);
+
+            long currentTime = System.currentTimeMillis();
+            return LoginResponse.builder()
+                    .accessToken(accessToken)
+                    .accessTokenTTL(currentTime + accessTokenTtl)
+                    .refreshToken(refreshToken)
+                    .refreshTokenTTL(currentTime + refreshTokenTtl)
+                    .userDetail(userDetail)
+                    .build();
+        } finally {
+            if (hasNotCurrentTenant) {
+                TenantUtils.clear();
+            }
+        }
+    }
+
+    @Override
     public LoginResponse chatKeyToken(String chatKey) {
         if (FuncUtils.isEmpty(chatKey)) {
             return null;
@@ -611,6 +757,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                 .username(account.getUsername())
                 .name(account.getNickname())
                 .email(account.getEmail())
+                .platformAdmin(Boolean.TRUE.equals(account.getPlatformAdmin()))
                 .tenantId(tenantId)
                 .tenantCode(tenantCode)
                 .tenantName(tenantName)

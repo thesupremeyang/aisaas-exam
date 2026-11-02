@@ -18,6 +18,10 @@ public class ExamCandidateScoreVO {
     private Integer totalScoreMax = 100;
     private Integer theoryScoreMax = 100;
     private Integer practicalScoreMax = 100;
+    /** 理论分是否已录入；未录入时总成绩为空，考生端据此提示「成绩评定中」。 */
+    private boolean theoryScoreEntered;
+    /** 实操分是否已经由管理员发布固化。 */
+    private boolean practicalScorePublished;
     private List<QuestionScore> questions = List.of();
 
     @Getter
@@ -30,5 +34,9 @@ public class ExamCandidateScoreVO {
         private Long submissionId;
         private Long agentId;
         private String agentName;
+        /** 本题复核最终得分（已复核时非空）。 */
+        private Integer finalScore;
+        /** 复核意见；未复核为空。 */
+        private String reviewComment;
     }
 }

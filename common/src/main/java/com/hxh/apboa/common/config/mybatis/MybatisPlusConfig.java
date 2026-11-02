@@ -29,7 +29,8 @@ public class MybatisPlusConfig {
             TableConst.AGENT_CHAT_KEY,  // 会话密钥表（B类，跨租户共享）
             "agent_clone_record",      // 广场克隆审计表（跨租户共享）
             TableConst.EXAM_CAMPAIGN,   // 考试批次（平台级活动，对所有租户可见）
-            TableConst.EXAM_QUESTION    // 考试试题（挂在考试批次下，由平台 admin 统一管理）
+            TableConst.EXAM_QUESTION,   // 考试试题（挂在考试批次下，由平台 admin 统一管理）
+            TableConst.AI_GRADING_SETTINGS // AI 阅卷模型配置（平台级全局单行配置）
     );
 
     @Bean

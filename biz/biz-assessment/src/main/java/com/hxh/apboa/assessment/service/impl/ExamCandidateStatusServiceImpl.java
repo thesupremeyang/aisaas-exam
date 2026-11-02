@@ -61,6 +61,9 @@ public class ExamCandidateStatusServiceImpl implements ExamCandidateStatusServic
             ExamCampaignTiming.State state = ExamCampaignTiming.state(campaign, now);
             List<ExamEnrollment> enrollments = enrollmentMapper.selectList(new LambdaQueryWrapper<ExamEnrollment>()
                     .eq(ExamEnrollment::getCampaignId, campaignId)
+                    .eq(ExamEnrollment::getEnabled, true)
+                    .eq(ExamEnrollment::getStatus, "REGISTERED")
+                    .apply("del_flag = 0")
                     .orderByAsc(ExamEnrollment::getCreatedAt));
 
             Map<Long, Account> accountMap = loadAccounts(enrollments);
@@ -161,6 +164,8 @@ public class ExamCandidateStatusServiceImpl implements ExamCandidateStatusServic
         candidate.setAccountId(enrollment.getAccountId());
         candidate.setCandidateName(account == null ? enrollment.getName() : firstNonBlank(account.getNickname(), account.getUsername(), enrollment.getName()));
         candidate.setUsername(account == null ? null : account.getUsername());
+        candidate.setEmail(account == null ? null : account.getEmail());
+        candidate.setAccountEnabled(account != null && Boolean.TRUE.equals(account.getEnabled()));
         candidate.setOrganization(enrollment.getOrganization());
         candidate.setLoggedIn(loggedInAccountIds.contains(enrollment.getAccountId()));
         candidate.setEntered(enrollment.getEnteredAt() != null);

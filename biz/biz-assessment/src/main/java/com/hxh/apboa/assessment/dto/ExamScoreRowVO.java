@@ -18,6 +18,8 @@ public class ExamScoreRowVO {
     private String loginName;
     private String organization;
     private String tenantName;
+    /** 考生租户 ID，用于管理员进入考生配置空间 */
+    private Long tenantId;
     private String workType;
     private String workTypeLabel;
     private String workName;

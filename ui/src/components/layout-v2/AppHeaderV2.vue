@@ -2,7 +2,7 @@
   v2 门户顶部 sub-header 组件
 
   左侧：移动端 Drawer 触发按钮 + 全局搜索框
-  右侧：通知 + 创建智能体按钮
+  右侧：工具按钮 + 头像
 
   @author huxuehao
 -->
@@ -10,7 +10,7 @@
 import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAccountStore } from '@/stores'
-import { BellOutlined, BookOutlined, MenuOutlined, LogoutOutlined, SettingOutlined, UndoOutlined } from '@ant-design/icons-vue'
+import { BookOutlined, MenuOutlined, LogoutOutlined, SettingOutlined, UndoOutlined } from '@ant-design/icons-vue'
 import { Modal } from 'ant-design-vue'
 import { RoutePaths } from '@/router/constants'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
@@ -110,13 +110,6 @@ function openMarkdownDoc() {
           </button>
         </ATooltip>
       </template>
-      <ATooltip placement="bottom">
-        <template #title><span>通知</span></template>
-        <button class="icon-v2-btn" type="button">
-          <BellOutlined />
-          <span class="badge-v2-dot"></span>
-        </button>
-      </ATooltip>
 
       <ADropdown :trigger="['hover']" placement="bottomRight">
         <div class="header-user-v2">
@@ -158,11 +151,15 @@ function openMarkdownDoc() {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 
   strong {
     color: #17233b;
     font-size: 16px;
     letter-spacing: 0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
@@ -174,11 +171,53 @@ function openMarkdownDoc() {
   place-items: center;
   background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.22);
+  flex-shrink: 0;
 
   img {
     width: 28px;
     height: 28px;
     filter: brightness(0) invert(1);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header-v2 {
+    padding: 0 12px;
+    gap: 8px;
+  }
+
+  .header-v2-left {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .mobile-trigger-v2 {
+    margin-right: 6px;
+    flex-shrink: 0;
+  }
+
+  .header-v3-brand {
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .header-v3-logo {
+    width: 32px;
+    height: 32px;
+
+    img {
+      width: 24px;
+      height: 24px;
+    }
+  }
+
+  .header-v3-brand strong {
+    font-size: 14px;
+  }
+
+  .actions-v2 {
+    gap: 8px;
   }
 }
 
@@ -213,7 +252,6 @@ function openMarkdownDoc() {
 }
 
 .icon-v2-btn {
-  position: relative;
   width: 38px;
   height: 38px;
   border: none;
@@ -230,23 +268,6 @@ function openMarkdownDoc() {
     background: #f1f5f9;
     color: #2563eb;
   }
-
-  .badge-v2-dot {
-    position: absolute;
-    top: 8px;
-    right: 9px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #ef4444;
-    border: 2px solid #fff;
-    animation: badge-v2-pulse 2s ease-in-out infinite;
-  }
-}
-
-@keyframes badge-v2-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
 }
 
 .header-user-v2 {

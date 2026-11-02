@@ -57,10 +57,12 @@ const statusText = computed(
   () =>
     ({
       DRAFT: '草稿',
-      AI_QUEUED: 'AI 智评排队中',
+      AI_QUEUED: '已提交，评审中',
       REVIEW_PENDING: '等待评委复核',
       PUBLISHED: '成绩已发布',
       TIMEOUT_SUBMITTED: '时间到，已自动交卷',
+      PARTIAL_TIMEOUT_SUBMITTED: '时间到，已自动交卷（内容不完整）',
+      NO_ANSWER: '时间到，已自动交卷（未作答）',
     })[examStore.submission?.status || 'DRAFT'] ||
     examStore.submission?.status ||
     '草稿',
@@ -100,11 +102,61 @@ function toDraft(): ExamSubmission {
   }
 }
 
+/**
+ * 草稿本地兜底：保存失败时暂存本机，页面恢复后自动补传。
+ * 2026-09-05 事故复盘——80 份空卷都是因为内容没能写回服务端，且失败后没有任何补救。
+ */
+const pendingDraftKey = computed(() => `exam:pending-draft:${props.submissionId}`)
+
+function writePendingDraft(fingerprint: string) {
+  try {
+    localStorage.setItem(
+      pendingDraftKey.value,
+      JSON.stringify({ fingerprint, draft: toDraft(), savedAt: Date.now() }),
+    )
+  } catch {
+    /* 存储不可用则放弃兜底，不阻塞主流程 */
+  }
+}
+
+function readPendingDraft(): { fingerprint: string; draft: ExamSubmission } | null {
+  try {
+    const raw = localStorage.getItem(pendingDraftKey.value)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function clearPendingDraft() {
+  try {
+    localStorage.removeItem(pendingDraftKey.value)
+  } catch {
+    /* ignore */
+  }
+}
+
 async function load() {
   try {
     hydrate(await examStore.loadSubmission(props.submissionId))
+    await flushPendingDraft()
   } catch {
-    message.error('无法加载作品信息，请稍后重试')
+    message.warning('无法加载作品信息，请稍后重试')
+  }
+}
+
+/** 补传上次保存失败、暂存在本机的草稿；仍失败则保留，后续自动保存会继续尝试 */
+async function flushPendingDraft() {
+  if (readOnly.value) return
+  const pending = readPendingDraft()
+  if (!pending) return
+  try {
+    await examStore.saveDraft(props.submissionId, pending.draft)
+    lastSavedFingerprint = pending.fingerprint
+    clearPendingDraft()
+    message.success('已补传上次未保存成功的内容')
+  } catch {
+    /* 仍失败则继续保留 */
   }
 }
 
@@ -119,10 +171,15 @@ async function saveDraft(showMessage = true): Promise<boolean> {
     try {
       await examStore.saveDraft(props.submissionId, toDraft())
       lastSavedFingerprint = fingerprint
+      // 保存成功：清掉本地兜底副本
+      clearPendingDraft()
       if (showMessage) message.success('作品草稿已保存')
       return true
     } catch {
-      message.error('保存失败，请稍后重试')
+      // 2026-09-05 事故：当天系统故障时保存请求根本发不出去，考生填的内容全丢。
+      // 保存失败时把草稿落到 localStorage，页面恢复后自动补传，不再一丢了之。
+      writePendingDraft(fingerprint)
+      message.warning('保存失败，内容已暂存在本机，恢复连接后会自动重试')
       return false
     }
   })()
@@ -160,7 +217,7 @@ async function openAgentSelector() {
       }
     }
   } catch {
-    message.error('加载我的智能体失败，请稍后重试')
+    message.warning('加载我的智能体失败，请稍后重试')
   } finally {
     agentSelectorLoading.value = false
   }
@@ -175,7 +232,7 @@ async function openAgentConfiguration() {
     agentConfig.value = response.data.data || null
   } catch {
     agentConfigVisible.value = false
-    message.error('无法加载智能体配置，请稍后重试')
+    message.warning('无法加载智能体配置，请稍后重试')
   } finally {
     agentConfigLoading.value = false
   }
@@ -304,7 +361,7 @@ async function uploadMaterial(kind: 'videoFiles' | 'screenshotFiles' | 'packageF
     }
     await saveDraft(false)
   } catch {
-    message.error('文件上传失败，请稍后重试')
+    message.warning('文件上传失败，请稍后重试')
   } finally {
     uploading.value[kind] = false
   }
@@ -402,16 +459,46 @@ async function submit() {
     const saved = await saveDraft(false)
     if (!saved) return
     await examStore.submitWork(props.submissionId)
-    message.success('作品已提交，正在生成 AI 智评报告')
+    // 标记刚提交：评审状态页据此先展示「AI 智评正在进行」过场，再显示完成提示
+    sessionStorage.setItem('exam:just-submitted', String(props.submissionId))
+    message.success('作品已提交')
     await router.push({ name: 'CandidateAssessment', params: { submissionId: props.submissionId } })
   } catch {
-    message.error('提交失败，请检查信息后重试')
+    // 后端的具体原因（如「请选择平台内智能体后再提交」）已由响应拦截器提示，
+    // 这里不再重复弹一句笼统的「提交失败」，而是把考生带到缺失的那一步。
+    // 2026-09-05 事故：当天 267 次交卷失败都只显示笼统提示，考生只能反复点提交。
+    if (!agentId.value) {
+      message.warning('还未选择平台内智能体，请先在「作品信息」中选择')
+      currentStep.value = 2
+      await openAgentSelector()
+      return
+    }
+    message.warning('提交失败，请稍后重试；若持续失败请联系监考老师')
   }
 }
 
 function handleExamExpired() {
+  // 考试结束即将切为只读：先把内存里的内容尽力落库，再重新加载
+  if (!readOnly.value) void saveDraft(false)
   examExpired.value = true
   void load()
+}
+
+/** 切到后台/最小化时立即保存一次，不等 1s 防抖 */
+function handleVisibilityChange() {
+  if (document.visibilityState !== 'hidden') return
+  if (readOnly.value) return
+  void saveDraft(false)
+}
+
+/** 有未保存内容时离开页面给出确认，并落一份本机兜底 */
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (readOnly.value) return
+  const fingerprint = draftFingerprint()
+  if (fingerprint === lastSavedFingerprint) return
+  writePendingDraft(fingerprint)
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 function handleExamWindowUpdated() {
@@ -432,12 +519,20 @@ watch(() => props.submissionId, load)
 onMounted(() => {
   window.addEventListener('exam:expired', handleExamExpired)
   window.addEventListener('exam:window-state-updated', handleExamWindowUpdated)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('beforeunload', handleBeforeUnload)
   void load()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('exam:expired', handleExamExpired)
   window.removeEventListener('exam:window-state-updated', handleExamWindowUpdated)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   if (autosaveTimer) window.clearTimeout(autosaveTimer)
+  // 卸载前若有未保存内容，留一份本机兜底
+  if (!readOnly.value && draftFingerprint() !== lastSavedFingerprint) {
+    writePendingDraft(draftFingerprint())
+  }
 })
 sessionStorage.setItem('exam:submissionId', props.submissionId)
 </script>
@@ -447,7 +542,7 @@ sessionStorage.setItem('exam:submissionId', props.submissionId)
     <header class="page-header">
       <div>
         <h1>提交你的智能体作品</h1>
-        <p>依次补充作品信息与材料；AI 智评只读取本页提交内容和受控的智能体摘要。</p>
+        <p>依次补充作品信息与材料，提交后由评委统一评审。</p>
       </div>
       <a-tag color="blue" class="status-tag">{{ statusText }}</a-tag>
     </header>
@@ -456,14 +551,14 @@ sessionStorage.setItem('exam:submissionId', props.submissionId)
       v-if="submitted"
       :type="examStore.submission?.status === 'TIMEOUT_SUBMITTED' ? 'warning' : 'info'"
       show-icon
-      :message="examStore.submission?.status === 'TIMEOUT_SUBMITTED' ? '考试时间到，系统已自动交卷。' : '作品已提交，当前内容已进入评测流程。'"
+      :message="examStore.submission?.status === 'TIMEOUT_SUBMITTED' ? '考试时间到，系统已自动交卷。' : '作品已提交，最终成绩将由评委评定后公布。'"
       class="submitted-alert"
     >
       <template #action>
         <a-button
           type="link"
           @click="router.push({ name: 'CandidateAssessment', params: { submissionId } })"
-          >查看 AI 智评</a-button
+          >查看评审状态</a-button
         >
       </template>
     </a-alert>
@@ -489,7 +584,7 @@ sessionStorage.setItem('exam:submissionId', props.submissionId)
       <a-step title="身份核验" description="确认参赛信息" class="step-clickable" @click="onStepClick(0)" />
       <a-step title="作品信息" description="选择并说明智能体" class="step-clickable" @click="onStepClick(1)" />
       <a-step title="材料说明" description="填写可验证材料" class="step-clickable" @click="onStepClick(2)" />
-      <a-step title="确认提交" description="开始 AI 智评" class="step-clickable" @click="onStepClick(3)" />
+      <a-step title="确认提交" description="完成考试提交" class="step-clickable" @click="onStepClick(3)" />
     </a-steps>
 
     <section class="content-grid" :class="{ 'is-readonly': readOnly }">
@@ -735,7 +830,7 @@ sessionStorage.setItem('exam:submissionId', props.submissionId)
             <a-button v-if="!readOnly" :loading="examStore.saving" @click="saveDraft()">保存草稿</a-button>
             <a-button v-if="currentStep < 4" type="primary" @click="next">下一步</a-button>
             <a-button v-if="!readOnly && currentStep === 4" type="primary" :loading="examStore.submitting" :disabled="examStore.saving || !agentId" @click="submit"
-              >提交并开始 AI 智评</a-button
+              >提交作品</a-button
             >
           </a-space>
         </div>
@@ -753,7 +848,7 @@ sessionStorage.setItem('exam:submissionId', props.submissionId)
           <li>不得提交智能体未实现、未配置或与实际效果不符的功能。</li>
         </ul>
         <p class="submission-reminder-consequence">
-          如提交内容脱离智能体实际配置、夸大或虚构功能，可能导致 AI 智评得分降低；情节严重的，可能取消本次考试成绩。
+          如提交内容脱离智能体实际配置、夸大或虚构功能，评委评审时可能酌情扣分；情节严重的，可能取消本次考试成绩。
         </p>
       </aside>
     </section>
@@ -1268,7 +1363,14 @@ sessionStorage.setItem('exam:submissionId', props.submissionId)
     overflow-x: auto;
   }
   .actions {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 10px;
+  }
+  .actions .ant-btn {
+    width: 100%;
+    margin: 0;
+    min-height: 44px;
   }
 }
 </style>

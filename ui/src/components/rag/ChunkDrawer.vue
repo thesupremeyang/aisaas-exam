@@ -86,7 +86,7 @@ function copyChunkContent(content: string) {
   navigator.clipboard.writeText(content).then(() => {
     message.success('已复制到剪贴板')
   }).catch(() => {
-    message.error('复制失败')
+    message.warning('复制失败')
   })
 }
 
@@ -114,7 +114,7 @@ async function saveEditChunk() {
     editModalOpen.value = false
     await loadChunks()
   } catch (error) {
-    message.error('更新失败')
+    message.warning('更新失败')
   } finally {
     editSaving.value = false
   }

@@ -5,12 +5,26 @@ export class ReconnectionManager {
 
   constructor(
     private connectionManager: ConnectionManager,
-    private onReconnect: () => Promise<void>
+    private onReconnect: () => Promise<void>,
+    private onGiveUp?: () => void
   ) {}
 
+  /**
+   * 调度一次重连。收敛判断全部在这里完成：
+   * 主动断开 → 直接返回；次数/总窗口耗尽 → 标记放弃并只通知一次上层。
+   */
   scheduleReconnect() {
+    if (this.connectionManager.isManualDisconnect()) return;
+
+    this.connectionManager.beginReconnectWindow();
+
     if (!this.connectionManager.shouldReconnect()) {
-      console.log('达到最大尝试连接次数');
+      const firstTime = !this.connectionManager.hasGaveUp();
+      this.connectionManager.giveUp();
+      if (firstTime) {
+        console.warn('WebSocket 重连已停止：超过次数或时间窗口上限，请用户手动重试');
+        this.onGiveUp?.();
+      }
       return;
     }
 
@@ -21,18 +35,20 @@ export class ReconnectionManager {
     this.reconnectTimer = window.setTimeout(async () => {
       this.connectionManager.incrementReconnectAttempts();
 
-      // 确保重连前连接已断开
-      if (this.connectionManager.isConnected()) {
-        this.connectionManager.disconnect();
-      }
+      // 已在连/已连接则跳过本轮，避免双连接
+      if (this.connectionManager.isConnected()) return;
 
-      await this.onReconnect();
+      try {
+        await this.onReconnect();
+      } catch {
+        // 失败后由 onClose/onError 再次调度
+      }
     }, delay);
   }
 
   cancelReconnect() {
     this.clearReconnectTimer();
-    this.connectionManager.resetReconnectAttempts();
+    this.connectionManager.resetReconnectState();
   }
 
   private clearReconnectTimer() {

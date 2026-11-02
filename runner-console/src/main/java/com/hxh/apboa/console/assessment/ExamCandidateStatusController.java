@@ -25,7 +25,7 @@ public class ExamCandidateStatusController {
     }
 
     private void requirePlatformAdmin() {
-        if (!"admin".equalsIgnoreCase(UserUtils.getAccount())) {
+        if (!UserUtils.isPlatformAdmin()) {
             throw new NotAuthException("仅平台 admin 可查看考生状态");
         }
     }

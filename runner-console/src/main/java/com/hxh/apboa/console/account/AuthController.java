@@ -115,4 +115,13 @@ public class AuthController {
         LoginResponse res = accountService.selectTenant(request);
         return R.data(res, "租户选择成功");
     }
+
+    /**
+     * 平台管理员进入考生租户查看（签发模拟令牌：考生租户上下文、无平台豁免；
+     * 退出查看时前端换回管理员原令牌）
+     */
+    @PostMapping("/admin/view-tenant")
+    public R<LoginResponse> adminViewTenant(@RequestBody SelectTenantRequest request) {
+        return R.data(accountService.viewTenantAsAdmin(request.getTenantId()), "已进入考生配置界面");
+    }
 }

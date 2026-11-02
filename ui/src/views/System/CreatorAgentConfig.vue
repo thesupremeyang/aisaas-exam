@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { CheckCircleFilled, RobotOutlined } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
 import { useAccountStore } from '@/stores'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
 import * as portalApi from '@/api/v2Portal'
 import AgentConfigEdit from '@/components/agent/config/AgentConfigEdit.vue'
 import type { AgentDefinitionVO, SkillPackageVO } from '@/types'
@@ -14,7 +15,7 @@ const agentData = ref<AgentDefinitionVO>()
 const sourceSkills = ref<SkillPackageVO[]>([])
 
 const isPlatformAdmin = computed(
-  () => accountStore.userInfo?.username?.toLowerCase() === 'admin',
+  () => isPlatformAdminUsername(accountStore.userInfo?.username),
 )
 
 async function loadConfig() {

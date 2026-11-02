@@ -25,6 +25,7 @@ import AgentConfigHistory from './AgentConfigHistory.vue'
 import AgentConfigApiDoc from './AgentConfigApiDoc.vue'
 import AgentConfigStatistics from './AgentConfigStatistics.vue'
 import { useAccountStore } from '@/stores'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
 
 const props = defineProps<{
   visible: boolean
@@ -45,7 +46,7 @@ const examCandidateMode = computed(() => {
   return sessionStorage.getItem('exam:candidate-mode') === '1'
     && !!currentAccount
     && examAccount === String(currentAccount)
-    && accountStore.userInfo?.username?.toLowerCase() !== 'admin'
+    && !isPlatformAdminUsername(accountStore.userInfo?.username)
 })
 
 /**

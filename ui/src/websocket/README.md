@@ -6,7 +6,7 @@
 useWebSocket          ← 根组件调用，管理连接生命周期
     │
     ├── ConnectionManager    ← 负责建连/断连/状态维护
-    ├── ReconnectionManager  ← 自动重连（指数退避，最多约6小时）
+    ├── ReconnectionManager  ← 自动重连（三段式：快速重试 → 慢速保活 → 放弃并提示）
     └── EnhancedMessageHandler ← 消息解析 + PING/PONG 处理
             │
             └── eventBus.emit(message.type, payload)
@@ -109,7 +109,9 @@ const {
   isConnecting,  // Ref<boolean> 是否正在连接中
   error,         // Ref<Error | null> 最近一次错误
   messageHandler,// Ref<EnhancedMessageHandler | null>
+  gaveUp,        // Ref<boolean> 重连已停止（超过次数/时间窗口），需用户手动重试
   initWS,        // () => Promise<void> 发起连接
+  retryWS,       // () => Promise<void> 手动重试（重置重连状态后再连一次）
   disconnectWS,  // () => void 主动断开（不触发重连）
   sendMessage,   // <T>(type, payload?) => boolean 发送消息
 } = useWebSocket();
@@ -335,10 +337,27 @@ useWebSocketEvent('WEBSOCKET:CONNECTION_STATE', (state) => {
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `INITIAL_RECONNECT_DELAY` | 45 秒 | 首次重连等待时间 |
-| `MAX_RECONNECT_DELAY` | 5 分钟 | 最大重连间隔（指数退避上限） |
-| `MAX_RECONNECT_ATTEMPTS` | 1440 次 | 最大重连次数（约 6 小时） |
+| `FAST_RECONNECT_ATTEMPTS` | 6 次 | 快速重试次数，用于吸收抖动/短暂断网 |
+| `INITIAL_RECONNECT_DELAY` | 800 ms | 首次重连等待时间，之后按 1.5 倍指数退避 |
+| `MAX_RECONNECT_DELAY` | 30 秒 | 快速阶段退避上限 |
+| `SLOW_RECONNECT_DELAY` | 15 秒 | 快速重试用尽后进入慢速保活，固定间隔 |
+| `MAX_RECONNECT_ATTEMPTS` | 40 次 | 重连次数硬上限 |
+| `RECONNECT_WINDOW_MS` | 10 分钟 | 重连总时长硬上限（自首次失败起算） |
+| `RECONNECT_JITTER` | 0.3 | 退避抖动比例，避免大量客户端同时重连造成惊群 |
 
-- 异常断开（网络波动、服务端关闭）→ **自动重连**，按指数退避增加间隔
+**三段式策略**：
+
+1. **快速重试**：前 6 次，800ms 起步指数退避（30s 封顶），应对网络抖动。
+2. **慢速保活**：之后固定 15s 一次，应对较长故障。
+3. **彻底放弃**：达到 40 次或累计 10 分钟仍未连上，停止重连并 `emit('WEBSOCKET:GIVE_UP')`，
+   UI 弹出提示条让用户"重新连接"或"刷新页面"。
+
+- 异常断开（网络波动、服务端关闭）→ **自动重连**，按上述三段式策略
 - 主动调用 `disconnectWS()` → **不触发重连**
-- 重连成功后，重连计数自动重置
+- 重连成功后，重连计数与窗口自动重置
+- 页面切回前台（`visibilitychange`）会立即重试一次，不必等当前退避计时器
+
+> **为什么不再无限重连**：2026-09-05 线上考试时 Nginx 缺 `/web/api/ws/` 路由，WebSocket
+> 永远连不上，前端按 1440 次上限持续重试，既把页面拖死（考生填的内容走不到 autosave，
+> 留下 80 份空卷），又把服务端日志灌到 53MB / 37 万行。持久故障下"静默无限重连"
+> 比"明确告诉用户断了"危害更大。

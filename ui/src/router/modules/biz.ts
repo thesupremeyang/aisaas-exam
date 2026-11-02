@@ -128,7 +128,7 @@ const bizRoutes: AppRouteRecordRaw[] = [
         name: 'ReviewerScores',
         component: () => import('@/views/exam/ReviewerScoreListPage.vue'),
         meta: {
-          title: '学员成绩复核',
+          title: '成绩与发布',
           hidden: true,
           hideFooter: true,
         },
@@ -138,8 +138,48 @@ const bizRoutes: AppRouteRecordRaw[] = [
         name: RouteNames.EXAM_ADMIN,
         component: () => import('@/views/exam/ExamCampaignAdminPage.vue'),
         meta: {
-          title: '考试时间管理',
-          hidden: true,
+          title: '考试场次',
+          hidden: false,
+          hideFooter: true,
+        },
+      },
+      {
+        path: RoutePaths.EXAM_QUESTIONS,
+        name: RouteNames.EXAM_QUESTIONS,
+        component: () => import('@/views/exam/ExamQuestionAdminPage.vue'),
+        meta: {
+          title: '试题管理',
+          hidden: false,
+          hideFooter: true,
+        },
+      },
+      {
+        path: RoutePaths.EXAM_SUBMISSIONS,
+        name: RouteNames.EXAM_SUBMISSIONS,
+        component: () => import('@/views/exam/ExamSubmissionAdminPage.vue'),
+        meta: {
+          title: '答卷管理',
+          hidden: false,
+          hideFooter: true,
+        },
+      },
+      {
+        path: RoutePaths.EXAM_GRADING,
+        name: RouteNames.EXAM_GRADING,
+        component: () => import('@/views/exam/ExamGradingAdminPage.vue'),
+        meta: {
+          title: 'AI 阅卷',
+          hidden: false,
+          hideFooter: true,
+        },
+      },
+      {
+        path: RoutePaths.USER_MANAGE,
+        name: RouteNames.USER_MANAGE,
+        component: () => import('@/views/Account/UserManagePage.vue'),
+        meta: {
+          title: '用户管理',
+          hidden: false,
           hideFooter: true,
         },
       },
@@ -148,8 +188,8 @@ const bizRoutes: AppRouteRecordRaw[] = [
         name: RouteNames.EXAM_CANDIDATE_STATUS,
         component: () => import('@/views/exam/ExamCandidateStatusAdminPage.vue'),
         meta: {
-          title: '考生状态管理',
-          hidden: true,
+          title: '考生管理',
+          hidden: false,
           hideFooter: true,
         },
       },

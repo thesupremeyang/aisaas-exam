@@ -63,6 +63,25 @@ public class AgentDefinitionServiceImpl extends ServiceImpl<AgentDefinitionMappe
     private final MessagePublisher messagePublisher;
 
     @Override
+    public Long resolveAgentId(String agentKey) {
+        if (agentKey == null || agentKey.isBlank()) {
+            return null;
+        }
+        String key = agentKey.trim();
+        if (key.chars().allMatch(Character::isDigit)) {
+            try {
+                return Long.parseLong(key);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("无效的智能体ID: " + agentKey);
+            }
+        }
+        AgentDefinition byCode = getOne(new LambdaQueryWrapper<AgentDefinition>()
+                .eq(AgentDefinition::getAgentCode, key)
+                .last("limit 1"), false);
+        return byCode == null ? null : byCode.getId();
+    }
+
+    @Override
     public AgentDefinitionVO agentDefinitionDetail(Long id) {
         AgentDefinition entity = getById(id);
         if (entity == null) {

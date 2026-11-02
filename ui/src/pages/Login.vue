@@ -157,7 +157,7 @@ async function handleSelectTenant(tenant: TenantInfo) {
     }
   } catch (error) {
     console.error('选择租户登录失败:', error)
-    message.error('选择租户登录失败，请重试')
+    message.warning('选择租户登录失败，请重试')
   } finally {
     selectingTenant.value = false
   }

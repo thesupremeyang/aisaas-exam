@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
-import { ReloadOutlined } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
 import {
   getCandidateScore,
@@ -28,13 +27,18 @@ function formatScore(value?: number | null): string {
 
 async function loadScore() {
   if (!props.campaign.id) return
+  // 查分未开启时不要打成绩接口，避免业务拒绝刷屏
+  if (props.progress && props.progress.scoreQueryEnabled !== true && props.campaign.scoreQueryEnabled !== true) {
+    score.value = null
+    return
+  }
   loading.value = true
   try {
     const response = await getCandidateScore(props.campaign.id)
     score.value = response.data.data || null
   } catch {
+    // 网络抖动/未开启查分：页面内展示空态即可，不弹红框
     score.value = null
-    message.error('成绩加载失败，请稍后重试')
   } finally {
     loading.value = false
   }
@@ -49,7 +53,7 @@ async function openAgentManagement() {
     if (!ticket) throw new Error('no ticket')
     await router.push({ path: '/agent', query: { examTicket: ticket } })
   } catch {
-    message.error('进入智能体平台失败，请稍后重试')
+    message.warning('进入智能体平台失败，请稍后重试')
   } finally {
     openingAgentManagement.value = false
   }
@@ -66,15 +70,6 @@ onMounted(() => {
       <div>
         <p class="score-eyebrow">成绩查询</p>
         <h1>{{ campaign.name || '本次考试' }}</h1>
-      </div>
-      <div class="score-heading-actions">
-        <a-button type="primary" :loading="openingAgentManagement" @click="openAgentManagement">
-          进入智能体管理
-        </a-button>
-        <a-button :loading="loading" @click="loadScore">
-          <template #icon><ReloadOutlined /></template>
-          刷新成绩
-        </a-button>
       </div>
     </header>
 
@@ -170,13 +165,6 @@ onMounted(() => {
 
 .score-heading {
   margin-bottom: 26px;
-}
-
-.score-heading-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
 }
 
 .score-eyebrow {

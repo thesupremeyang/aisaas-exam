@@ -153,7 +153,7 @@ function handleUpload(file: File) {
       loadDocuments()
     })
     .catch((error) => {
-      message.error('文档上传失败')
+      message.warning('文档上传失败')
       console.error(error)
     })
     .finally(() => {

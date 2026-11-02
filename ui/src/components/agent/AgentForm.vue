@@ -16,6 +16,7 @@ import type { AgentDefinitionVO } from '@/types'
 import { ToolChoiceStrategy } from '@/types'
 import * as agentApi from '@/api/agent'
 import { useAccountStore } from '@/stores'
+import { isPlatformAdminUsername } from '@/utils/platformAdmin'
 
 const accountStore = useAccountStore()
 const { currentTenant } = accountStore
@@ -26,7 +27,7 @@ const examCandidateMode = computed(() => {
   return sessionStorage.getItem('exam:candidate-mode') === '1'
     && !!currentAccount
     && examAccount === String(currentAccount)
-    && accountStore.userInfo?.username?.toLowerCase() !== 'admin'
+    && !isPlatformAdminUsername(accountStore.userInfo?.username)
 })
 
 /**
@@ -373,11 +374,14 @@ function handleCancel() {
     destroyOnClose
     @cancel="handleCancel"
   >
-    <ASteps
-      :current="currentStep"
-      :items="steps"
-      @change="handleStepChange"
-      class="mb-lg"/>
+    <div class="agent-form-steps-scroll">
+      <ASteps
+        :current="currentStep"
+        :items="steps"
+        @change="handleStepChange"
+        class="mb-lg"
+      />
+    </div>
 
     <div class="form-content" v-if="visible">
       <AgentFormBasic
@@ -445,5 +449,58 @@ function handleCancel() {
 
 .form-actions {
   padding-top: var(--spacing-md);
+}
+
+@media (max-width: 768px), (max-width: 1023px) and (max-height: 500px) {
+  .agent-form-steps-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+
+    :deep(.ant-steps) {
+      width: max-content;
+      min-width: 100%;
+    }
+
+    :deep(.ant-steps-item) {
+      flex: 0 0 auto;
+      min-width: 112px;
+      padding-inline-end: 12px;
+    }
+
+    :deep(.ant-steps-item-description),
+    :deep(.ant-steps-item-tail) {
+      display: none;
+    }
+  }
+
+  .form-content {
+    width: 100%;
+    height: auto !important;
+    max-height: none;
+    overflow: visible;
+    padding: 8px 0;
+    box-sizing: border-box;
+  }
+
+  .form-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-top: 0 !important;
+    padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px));
+    background: #fff;
+
+    :deep(.ant-space) {
+      gap: 4px !important;
+    }
+
+    :deep(.ant-btn) {
+      min-height: 36px;
+      padding-inline: 8px;
+      font-size: 12px;
+    }
+  }
 }
 </style>

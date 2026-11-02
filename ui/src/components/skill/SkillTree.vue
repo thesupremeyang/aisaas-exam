@@ -183,7 +183,7 @@ async function handleCreateConfirm() {
     if (dotIdx > 0) {
       const ext = createModal.name.substring(dotIdx + 1).toLowerCase()
       if (!extensions.includes(ext)) {
-        message.error(`不允许的文件类型: .${ext}，请使用白名单内的扩展名`)
+        message.warning(`不允许的文件类型: .${ext}，请使用白名单内的扩展名`)
         return
       }
     }

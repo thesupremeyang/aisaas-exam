@@ -61,4 +61,7 @@ public class TableConst {
     public static final String ASSESSMENT_RESULT = "assessment_result";
     public static final String EXAM_SSO_TICKET = "exam_sso_ticket";
     public static final String EXAM_QUESTION = "exam_question";
+    public static final String EXAM_GRADING_TASK = "exam_grading_task";
+    public static final String EXAM_GRADING_RESULT = "exam_grading_result";
+    public static final String AI_GRADING_SETTINGS = "ai_grading_settings";
 }

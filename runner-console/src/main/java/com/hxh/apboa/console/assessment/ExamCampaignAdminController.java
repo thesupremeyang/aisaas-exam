@@ -74,7 +74,7 @@ public class ExamCampaignAdminController {
     }
 
     private void requirePlatformAdmin() {
-        if (!"admin".equalsIgnoreCase(UserUtils.getAccount())) {
+        if (!UserUtils.isPlatformAdmin()) {
             throw new NotAuthException("仅平台 admin 可管理考试时间");
         }
     }

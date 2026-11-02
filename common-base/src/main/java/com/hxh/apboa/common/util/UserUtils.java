@@ -11,6 +11,8 @@ import jakarta.servlet.http.HttpServletRequest;
  * @author huxuehao
  **/
 public class UserUtils {
+    private static final String PLATFORM_ADMIN_USERNAMES_ENV = "APBOA_PLATFORM_ADMIN_USERNAMES";
+
     public static Long getId() {
         UserDetail userDetail = getUserDetail();
         if (userDetail == null) {
@@ -25,6 +27,39 @@ public class UserUtils {
             return null;
         }
         return userDetail.getUsername();
+    }
+
+    /**
+     * 判断当前登录用户是否为平台管理员。
+     *
+     * <p>优先读取账号表的平台管理员标记（随登录 token 快照生效），
+     * 同时保留环境变量/系统属性配置的平台管理员账号作为兜底（默认 admin）。</p>
+     */
+    public static boolean isPlatformAdmin() {
+        UserDetail userDetail = getUserDetail();
+        if (userDetail != null && Boolean.TRUE.equals(userDetail.getPlatformAdmin())) {
+            return true;
+        }
+        return isPlatformAdminUsername(getAccount());
+    }
+
+    public static boolean isPlatformAdminUsername(String username) {
+        if (username == null || username.isBlank()) {
+            return false;
+        }
+        String configured = System.getProperty("apboa.platform-admin-usernames");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv(PLATFORM_ADMIN_USERNAMES_ENV);
+        }
+        if (configured == null || configured.isBlank()) {
+            configured = "admin";
+        }
+        for (String item : configured.split(",")) {
+            if (username.trim().equalsIgnoreCase(item.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static Long getTenantId() {

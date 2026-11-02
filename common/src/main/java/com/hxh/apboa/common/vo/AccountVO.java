@@ -19,6 +19,8 @@ public class AccountVO implements SerializableEnable {
     private String email;
     private String username;
     private Boolean enabled;
+    /** 是否平台管理员 */
+    private Boolean platformAdmin;
     /** 当前租户内的角色 */
     private String tenantRole;
     private LocalDateTime createdAt;

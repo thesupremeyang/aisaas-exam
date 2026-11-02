@@ -31,7 +31,11 @@ export const RouteNames = {
   CANDIDATE_ASSESSMENT: 'CandidateAssessment',
   REVIEWER_ASSESSMENT: 'ReviewerAssessment',
   EXAM_ADMIN: 'ExamAdmin',
+  EXAM_QUESTIONS: 'ExamQuestions',
+  EXAM_SUBMISSIONS: 'ExamSubmissions',
   EXAM_CANDIDATE_STATUS: 'ExamCandidateStatus',
+  EXAM_GRADING: 'ExamGrading',
+  USER_MANAGE: 'UserManage',
 
   // Agent广场
   EXPLORE: 'Explore',
@@ -104,7 +108,11 @@ export const RoutePaths = {
   CANDIDATE_ASSESSMENT: 'exam/candidate/submissions/:submissionId/assessment',
   REVIEWER_ASSESSMENT: 'exam/reviewer/submissions/:submissionId/review',
   EXAM_ADMIN: 'exam/admin/campaigns',
+  EXAM_QUESTIONS: 'exam/admin/questions',
+  EXAM_SUBMISSIONS: 'exam/admin/submissions',
   EXAM_CANDIDATE_STATUS: 'exam/admin/candidates',
+  EXAM_GRADING: 'exam/admin/grading',
+  USER_MANAGE: 'account',
 
   // Agent广场
   EXPLORE: 'explore',

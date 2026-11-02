@@ -26,6 +26,8 @@ public class UserDetail implements Serializable {
     private String username;
     // 邮箱
     private String email;
+    // 是否平台管理员（登录时从账号表读取，随 token 快照生效）
+    private Boolean platformAdmin;
     // 当前会话选中的租户ID
     private Long tenantId;
     // 当前租户编码

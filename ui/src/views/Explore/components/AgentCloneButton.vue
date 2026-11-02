@@ -67,7 +67,7 @@ async function handleConfirm(payload: { sourceAgentId: string | number; name: st
     emit('success', { id: data.id, name: data.name })
   } catch (e: any) {
     const errMsg = e?.response?.data?.msg || e?.message || '克隆失败'
-    message.error(errMsg)
+    message.warning(errMsg)
     emit('error', e instanceof Error ? e : new Error(errMsg))
   } finally {
     loading.value = false

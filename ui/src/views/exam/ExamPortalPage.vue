@@ -117,6 +117,8 @@ async function loadCampaigns() {
     campaigns.value = res.data.data || []
     campaign.value = campaigns.value[0] || null
     if (campaign.value) await loadProgress()
+  } catch {
+    // 首屏加载失败静默，页面显示空态即可
   } finally {
     loading.value = false
   }
@@ -129,27 +131,31 @@ const reachedWorkLimit = computed(() => {
 
 async function loadProgress() {
   if (!campaign.value) return
-  const res = await getCandidateProgress(campaign.value.id as string)
-  progress.value = res.data.data || null
-  if (progress.value?.examState) {
-    sessionStorage.setItem('exam:window-state', progress.value.examState)
-  } else {
-    sessionStorage.removeItem('exam:window-state')
+  try {
+    const res = await getCandidateProgress(campaign.value.id as string)
+    progress.value = res.data.data || null
+    if (progress.value?.examState) {
+      sessionStorage.setItem('exam:window-state', progress.value.examState)
+    } else {
+      sessionStorage.removeItem('exam:window-state')
+    }
+    if (progress.value?.scoreQueryEnabled) {
+      sessionStorage.setItem('exam:score-query-mode', '1')
+    } else {
+      sessionStorage.removeItem('exam:score-query-mode')
+    }
+    if (progress.value?.submissionId) sessionStorage.setItem('exam:submissionId', String(progress.value.submissionId))
+    sessionStorage.setItem('exam:campaignId', String(campaign.value?.id || ''))
+    sessionStorage.setItem('exam:candidate-mode', '1')
+    sessionStorage.setItem(
+      'exam:candidate-account',
+      String(accountStore.userInfo?.id || accountStore.userInfo?.username || ''),
+    )
+    sessionStorage.setItem('exam:rubricConfig', campaign.value?.configJson || '')
+    window.dispatchEvent(new Event('exam:context-updated'))
+  } catch {
+    // 进度轮询失败保留旧数据，不打断考试
   }
-  if (progress.value?.scoreQueryEnabled) {
-    sessionStorage.setItem('exam:score-query-mode', '1')
-  } else {
-    sessionStorage.removeItem('exam:score-query-mode')
-  }
-  if (progress.value?.submissionId) sessionStorage.setItem('exam:submissionId', String(progress.value.submissionId))
-  sessionStorage.setItem('exam:campaignId', String(campaign.value?.id || ''))
-  sessionStorage.setItem('exam:candidate-mode', '1')
-  sessionStorage.setItem(
-    'exam:candidate-account',
-    String(accountStore.userInfo?.id || accountStore.userInfo?.username || ''),
-  )
-  sessionStorage.setItem('exam:rubricConfig', campaign.value?.configJson || '')
-  window.dispatchEvent(new Event('exam:context-updated'))
   await loadSubmissions()
   await loadQuestions()
 }
@@ -194,7 +200,7 @@ async function removeWork(item: ExamSubmission) {
         message.success('草稿已删除')
         await loadSubmissions()
       } catch {
-        message.error('删除失败，请稍后重试')
+        message.warning('删除失败，请稍后重试')
       }
     },
   })
@@ -259,7 +265,7 @@ async function addWork(questionId?: string | number) {
     }
   } catch {
     if (w) w.close()
-    message.error('新增作品失败，请稍后重试')
+    message.warning('新增作品失败，请稍后重试')
   } finally {
     addingWork.value = false
   }
@@ -280,6 +286,8 @@ function questionStatus(qId: string | number): { text: string; color: string } {
     DRAFT: { text: '草稿', color: 'default' },
     AI_QUEUED: { text: '已提交', color: 'processing' },
     TIMEOUT_SUBMITTED: { text: '已提交', color: 'processing' },
+    PARTIAL_TIMEOUT_SUBMITTED: { text: '已交卷（内容不完整）', color: 'warning' },
+    NO_ANSWER: { text: '未作答', color: 'error' },
     REVIEW_PENDING: { text: '待复核', color: 'warning' },
     PUBLISHED: { text: '已发布', color: 'success' },
   }
@@ -310,7 +318,7 @@ async function downloadAttachment(q: ExamQuestion) {
     a.click()
     window.URL.revokeObjectURL(url)
   } catch {
-    message.error('下载失败')
+    message.warning('下载失败')
   }
 }
 
@@ -320,6 +328,8 @@ function submissionStatusText(status?: string): string {
       DRAFT: '草稿',
       AI_QUEUED: '已提交',
       TIMEOUT_SUBMITTED: '已提交',
+      PARTIAL_TIMEOUT_SUBMITTED: '已交卷（内容不完整）',
+      NO_ANSWER: '未作答',
       REVIEW_PENDING: '待评委复核',
       PUBLISHED: '成绩已发布',
     }[status || 'DRAFT'] || status || '草稿'
@@ -350,7 +360,7 @@ function goAssessment(id?: string | number) {
 
 function handleAssessmentNav() {
   if (!progress.value?.submissionId || progress.value.submissionStatus === 'DRAFT') {
-    message.warning('提交作品后即可查看 AI 智评进度与报告')
+    message.warning('提交作品后即可查看评审进度')
     return
   }
   goAssessment()
@@ -364,7 +374,7 @@ async function openMyAgents() {
     const res = await listCandidateAgents(campaign.value.id as string)
     agents.value = res.data.data || []
   } catch {
-    message.error('无法加载我的智能体')
+    message.warning('无法加载我的智能体')
   } finally {
     agentLoading.value = false
   }
@@ -393,7 +403,7 @@ async function enterAgentPlatform() {
     await router.push({ path: '/agent', query: { examTicket: ticket } })
     agentGatewayModal.value = false
   } catch {
-    message.error('进入智能体平台失败，请稍后重试')
+    message.warning('进入智能体平台失败，请稍后重试')
   } finally {
     gatewayLoading.value = false
   }
@@ -418,6 +428,8 @@ const statusTag = computed(() => {
       REVIEW_PENDING: { text: '待评委复核', color: 'gold' },
       PUBLISHED: { text: '成绩已发布', color: 'success' },
       TIMEOUT_SUBMITTED: { text: '时间到，已自动交卷', color: 'orange' },
+      PARTIAL_TIMEOUT_SUBMITTED: { text: '时间到，已自动交卷（内容不完整）', color: 'volcano' },
+      NO_ANSWER: { text: '时间到，未作答', color: 'red' },
     }[s || 'DRAFT'] || { text: s || '草稿', color: 'blue' }
   )
 })
@@ -431,8 +443,10 @@ function fmt(ts?: string) {
 const progressTitle = computed(() => {
   const p = progress.value
   if (!p) return '等待提交作品'
+  if (p.submissionStatus === 'NO_ANSWER') return '时间到，未作答'
+  if (p.submissionStatus === 'PARTIAL_TIMEOUT_SUBMITTED') return '时间到，作品已自动交卷（内容不完整）'
   if (p.submissionStatus === 'TIMEOUT_SUBMITTED') return '时间到，作品已自动交卷'
-  if (p.submissionStatus && p.submissionStatus !== 'DRAFT') return p.aiPublished ? '成绩已发布' : 'AI 智评已完成'
+  if (p.submissionStatus && p.submissionStatus !== 'DRAFT') return p.aiPublished ? '成绩已发布' : '作品评审中'
   return '等待提交作品'
 })
 
@@ -585,7 +599,7 @@ watch(
                     删除
                   </a-button>
                   <a-button v-if="submissionForQuestion(q.id!)!.status && submissionForQuestion(q.id!)!.status !== 'DRAFT'" type="link" size="small" @click="goAssessment(submissionForQuestion(q.id!)!.id)">
-                    AI 智评
+                    查看评审
                   </a-button>
                 </template>
                 <a-button v-else type="primary" size="small" :loading="addingWork" :disabled="!canSubmit" @click="addWork(q.id)">
@@ -1088,6 +1102,33 @@ watch(
   }
   .flow {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .flow {
+    grid-template-columns: 1fr;
+  }
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .actions .p-btn,
+  .actions .ant-btn {
+    width: 100%;
+    margin: 0;
+  }
+  .gateway-actions,
+  .gateway-security {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .countdown-row {
+    gap: 8px;
+  }
+  .time-value {
+    font-size: 28px;
   }
 }
 </style>

@@ -32,7 +32,7 @@ async function enterPlatform() {
     if (!ticket) throw new Error('未获取到 SSO 凭证')
     await router.push({ path: '/agent', query: { examTicket: ticket } })
   } catch {
-    message.error('进入智能体平台失败，请稍后重试')
+    message.warning('进入智能体平台失败，请稍后重试')
   } finally {
     loading.value = false
   }

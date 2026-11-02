@@ -151,7 +151,7 @@ async function handleCopy(value: string) {
     await navigator.clipboard.writeText(value)
     message.success('已复制到剪贴板')
   } catch {
-    message.error('复制失败，请手动复制')
+    message.warning('复制失败，请手动复制')
   }
 }
 
