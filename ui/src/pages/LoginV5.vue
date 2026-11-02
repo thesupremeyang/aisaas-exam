@@ -12,6 +12,9 @@ import {
 import { md5 } from 'js-md5'
 import { useAccountStore } from '@/stores'
 import { RoutePaths } from '@/router/constants.ts'
+
+// 考试部署默认关闭自助注册（.env.main: VITE_REGISTER_ENABLED=false）
+const registerEnabled = import.meta.env.VITE_REGISTER_ENABLED === 'true'
 import type { LoginRequest, PendingApprovalInfo, TenantInfo } from '@/types'
 
 interface LoginForm extends LoginRequest {
@@ -202,7 +205,13 @@ const goToForgotPassword = () => {
               </div>
             </div>
 
-            <AButton type="primary" block size="large" @click="goToRegister">
+            <AButton
+              v-if="registerEnabled"
+              type="primary"
+              block
+              size="large"
+              @click="goToRegister"
+            >
               注册新租户
             </AButton>
           </div>
@@ -302,7 +311,7 @@ const goToForgotPassword = () => {
               </AButton>
             </AForm>
 
-            <div class="register-row">
+            <div v-if="registerEnabled" class="register-row">
               <span>还没有账号？</span>
               <button type="button" class="link-button" @click="goToRegister">
                 立即注册

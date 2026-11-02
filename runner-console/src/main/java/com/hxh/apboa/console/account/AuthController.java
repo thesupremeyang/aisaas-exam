@@ -7,6 +7,7 @@ import com.hxh.apboa.common.dto.*;
 import com.hxh.apboa.common.enums.TenantRole;
 import com.hxh.apboa.common.r.R;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -20,6 +21,10 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AccountService accountService;
+
+    /** 自助注册开关：考试场景默认关闭，账号由管理员统一开通 */
+    @Value("${auth.register.enabled:false}")
+    private boolean registerEnabled;
 
     /**
      * 用户登录
@@ -40,6 +45,9 @@ public class AuthController {
     @PassAuth
     @PostMapping("/register")
     public R<Boolean> register(@RequestBody RegisterRequest request) {
+        if (!registerEnabled) {
+            return R.fail("自助注册已关闭，账号由考试管理员统一开通");
+        }
         boolean result = accountService.register(request);
         return R.data(result);
     }

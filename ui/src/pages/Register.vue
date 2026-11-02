@@ -22,6 +22,11 @@ interface RegisterForm extends RegisterRequest {
 }
 
 const router = useRouter()
+
+// 考试部署关闭自助注册：直接进注册页也退回登录页
+if (import.meta.env.VITE_REGISTER_ENABLED !== 'true') {
+  router.replace({ path: '/login' })
+}
 const accountStore = useAccountStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
