@@ -37,7 +37,7 @@ pid_of() {
 start_console() {
   nohup "$JAVA" -jar "$ROOT/runner-console/target/runner-console-1.0-SNAPSHOT.jar" \
     --spring.profiles.active=exam-local --server.port="$CONSOLE_PORT" \
-    --jwt.secret=REPLACE_WITH_YOUR_JWT_SECRET \
+    --jwt.secret="${JWT_SECRET:?请先 export JWT_SECRET 再启动考试版服务}" \
     >>"$LOG_DIR/console.log" 2>&1 &
   disown 2>/dev/null || true
 }
@@ -46,7 +46,7 @@ start_runtime() {
   nohup "$JAVA" -jar "$ROOT/runner-runtime/target/runner-runtime-1.0-SNAPSHOT.jar" \
     --spring.profiles.active=exam-local --server.port="$RUNTIME_PORT" \
     --spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver \
-    --jwt.secret=REPLACE_WITH_YOUR_JWT_SECRET \
+    --jwt.secret="${JWT_SECRET:?请先 export JWT_SECRET 再启动考试版服务}" \
     >>"$LOG_DIR/runtime.log" 2>&1 &
   disown 2>/dev/null || true
 }
@@ -54,7 +54,7 @@ start_runtime() {
 start_websocket() {
   nohup "$JAVA" -jar "$ROOT/runner-websocket/target/runner-websocket-1.0-SNAPSHOT.jar" \
     --spring.profiles.active=exam-local --server.port="$WEBSOCKET_PORT" \
-    --jwt.secret=REPLACE_WITH_YOUR_JWT_SECRET \
+    --jwt.secret="${JWT_SECRET:?请先 export JWT_SECRET 再启动考试版服务}" \
     >>"$LOG_DIR/websocket.log" 2>&1 &
   disown 2>/dev/null || true
 }

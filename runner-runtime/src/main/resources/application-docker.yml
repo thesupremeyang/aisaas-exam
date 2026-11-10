@@ -73,7 +73,7 @@ spring:
       min-evictable-idle-time-millis: 300000
 
 jwt:
-  secret: ${JWT_SECRET:REPLACE_WITH_YOUR_JWT_SECRET}
+  secret: ${JWT_SECRET}
 
 # shell-proxy 远程命令执行代理配置
 shell-proxy:

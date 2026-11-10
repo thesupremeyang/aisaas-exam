@@ -5,10 +5,14 @@
 # 停止：./scripts/stop-exam-local.sh
 #
 # 服务端口：console 3160 / runtime 3161 / websocket 3164 / 前端 4100
-# 依赖：本机 MySQL 里有库 apboa_exam（root/123456）、Redis 已启动
+# 依赖：本机 MySQL 里有库 apboa_exam（连接信息见 application-dev.yml）、Redis 已启动
 #
 # 注意：请在你自己的终端窗口里运行本脚本，不要通过 agent 的后台任务启动
 # （后台任务会随会话结束被回收）。
+#
+# 密钥一律从环境变量注入，不要写回仓库：
+#   export JWT_SECRET='<32 字节以上的随机字符串>'
+#   export ASSESSMENT_GRADING_API_KEY='sk-...'
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -30,9 +34,10 @@ if [ -z "$NODE" ]; then
 fi
 
 # AI 阅卷（配置评分）模型通道：DeepSeek 官方 API（OpenAI 兼容）
-# 不配置时 AI 阅卷功能的入队会被守卫拦截，其余功能不受影响
+# 密钥只从环境变量读取，仓库内不保存任何真实 Key；
+# 不配置时 AI 阅卷功能的入队会被守卫拦截，其余功能不受影响。
 export ASSESSMENT_GRADING_ENDPOINT="${ASSESSMENT_GRADING_ENDPOINT:-https://api.deepseek.com/chat/completions}"
-export ASSESSMENT_GRADING_API_KEY="${ASSESSMENT_GRADING_API_KEY:-REPLACE_WITH_YOUR_DEEPSEEK_API_KEY}"
+export ASSESSMENT_GRADING_API_KEY="${ASSESSMENT_GRADING_API_KEY:-}"
 export ASSESSMENT_GRADING_MODEL="${ASSESSMENT_GRADING_MODEL:-deepseek-flash}"
 
 LOGDIR="$ROOT/.local-logs"
@@ -58,12 +63,12 @@ echo "启动后端服务…"
 # exam-local 的三个配置缺口：jwt.secret 缺失会导致登录 500、WS 握手"认证系统错误"；
 # driver-class-name 缺失会导致 runtime 起不来；websocket 同样必须带 jwt.secret
 start_java console   "$ROOT/runner-console/target/runner-console-1.0-SNAPSHOT.jar"     3160 \
-  --jwt.secret=REPLACE_WITH_YOUR_JWT_SECRET \
+  --jwt.secret="${JWT_SECRET:?请先 export JWT_SECRET 再启动考试版服务}" \
   --spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 start_java runtime   "$ROOT/runner-runtime/target/runner-runtime-1.0-SNAPSHOT.jar"     3161 \
   --spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 start_java websocket "$ROOT/runner-websocket/target/runner-websocket-1.0-SNAPSHOT.jar" 3164 \
-  --jwt.secret=REPLACE_WITH_YOUR_JWT_SECRET
+  --jwt.secret="${JWT_SECRET:?请先 export JWT_SECRET 再启动考试版服务}"
 
 echo "启动前端（http://127.0.0.1:4100/web/）…"
 # Vite 依赖预构建会生成 .vite/deps_temp_*，沙箱的批量删除保护会把它当成
